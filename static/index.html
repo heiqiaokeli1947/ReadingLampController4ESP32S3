@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>阅读灯控制台</title>
+    <link rel="stylesheet" href="static/spectre.min.css">
+    <style>
+        body { background: #f5f7fa; font-family: -apple-system, "Segoe UI", "PingFang SC", sans-serif; }
+        .header { background: linear-gradient(135deg, #2c3e50, #34495e); color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+        .header h1 { font-size: 1.4rem; margin: 0; }
+        .header .meta { font-size: 0.85rem; opacity: 0.85; }
+        .container { padding: 20px; max-width: 1200px; margin: 0 auto; }
+        .card { background: #fff; border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); padding: 20px; margin-bottom: 20px; }
+        .card h2 { font-size: 1.1rem; margin: 0 0 16px; color: #2c3e50; border-left: 4px solid #3498db; padding-left: 10px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+        .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
+        @media (max-width: 768px) {
+            .grid-2 { grid-template-columns: 1fr; }
+            .grid-4 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .grid-5 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .metric { padding: 10px; }
+            .metric .value { font-size: 1.4rem; }
+        }
+        .metric { text-align: center; padding: 14px; background: #f8fafc; border-radius: 8px; }
+        .metric .label { font-size: 0.8rem; color: #7f8c8d; }
+        .metric .value { font-size: 1.8rem; font-weight: 600; color: #2c3e50; margin-top: 4px; }
+        .metric .unit { font-size: 0.85rem; color: #95a5a6; }
+        .metric.warn .value { color: #e67e22; }
+        .metric.danger .value { color: #e74c3c; }
+        .metric.ok .value { color: #27ae60; }
+        .switch-btn { width: 100%; padding: 24px; font-size: 1.3rem; border-radius: 12px; border: none; cursor: pointer; transition: all 0.2s; }
+        .switch-btn.on { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.3); box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
+        .switch-btn.off { background: #ecf0f1; color: #7f8c8d; }
+        .slider-group { margin: 20px 0; }
+        .slider-group label { display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: 500; color: #34495e; }
+        .slider-group input[type=range] { width: 100%; }
+        .channel-bar { display: flex; height: 24px; border-radius: 12px; overflow: hidden; margin-top: 8px; }
+        .channel-bar .yellow { background: #f1c40f; }
+        .channel-bar .white { background: #ecf0f1; }
+        .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 2px solid #e1e8ed; }
+        .tab { padding: 10px 22px; cursor: pointer; border: none; background: none; font-size: 1rem; color: #7f8c8d; border-bottom: 3px solid transparent; margin-bottom: -2px; }
+        .tab.active { color: #3498db; border-bottom-color: #3498db; font-weight: 600; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; margin-bottom: 4px; font-size: 0.85rem; color: #555; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; }
+        .btn { padding: 8px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.9rem; }
+        .btn-primary { background: #3498db; color: #fff; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-warning { background: #f39c12; color: #fff; }
+        .btn-success { background: #27ae60; color: #fff; }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .pwm-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        @media (max-width: 600px) { .pwm-grid { grid-template-columns: 1fr 1fr; } }
+        .threshold-input { display: flex; gap: 10px; align-items: center; }
+        .threshold-input input { flex: 1; }
+        .chart-container { position: relative; height: 320px; }
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; }
+        .badge-ok { background: #d4efdf; color: #1e8449; }
+        .badge-warn { background: #fdebd0; color: #b9770e; }
+        .badge-bad { background: #fadbd8; color: #c0392b; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>💡 阅读灯控制台</h1>
+        <div class="meta">
+            <span id="devName">ReadingLamp</span> ·
+            v<span id="ver">--</span> ·
+            WiFi: <span id="wifiName">--</span> ·
+            运行 <span id="runTime">--</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="tabs">
+            <button class="tab active" data-tab="monitor">📊 监控</button>
+            <button class="tab" data-tab="settings">⚙️ 设置</button>
+        </div>
+
+        <!-- ========== 监控（含灯光控制） ========== -->
+        <div class="tab-panel active" id="panel-monitor">
+            <div class="card">
+                <h2>灯光控制</h2>
+                <button class="switch-btn off" id="btnSwitch">💡 点击开灯</button>
+
+                <div class="slider-group">
+                    <label><span>亮度</span><span><span id="brightnessVal">0</span>%</span></label>
+                    <input type="range" id="brightnessSlider" min="0" max="100" value="0">
+                </div>
+
+                <div class="slider-group">
+                    <label><span>色温（3000K 暖黄 ↔ 6000K 冷白）</span><span><span id="colorTempVal">4500</span>K</span></label>
+                    <input type="range" id="colorTempSlider" min="0" max="100" value="50">
+                </div>
+
+                <div style="margin-top:16px;padding-top:16px;border-top:1px solid #eee">
+                    <div style="font-size:0.85rem;color:#555;margin-bottom:8px">快捷场景</div>
+                    <div class="grid-4">
+                        <button class="btn btn-primary" data-scene="warm">🌅 暖光</button>
+                        <button class="btn btn-primary" data-scene="neutral">☀️ 中性</button>
+                        <button class="btn btn-primary" data-scene="cool">❄️ 冷白</button>
+                        <button class="btn" id="btnDelayedOff" style="background:#95a5a6;color:#fff">⏰ 延迟关灯:关</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <h2>散热系统</h2>
+                    <div class="grid-4">
+                        <div class="metric" id="m-fan-temp">
+                            <div class="label">散热器出水温度</div>
+                            <div class="value"><span id="fanTemp">--</span><span class="unit">℃</span></div>
+                        </div>
+                        <div class="metric" id="m-led-temp">
+                            <div class="label">LED温度</div>
+                            <div class="value"><span id="ledTemp">--</span><span class="unit">℃</span></div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">风扇转速</div>
+                            <div class="value"><span id="fanSpeed">0</span><span class="unit">%</span></div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">水泵转速</div>
+                            <div class="value"><span id="pumpSpeed">0</span><span class="unit">%</span></div>
+                        </div>
+                    </div>
+                    <div style="margin-top:14px;font-size:0.8rem;color:#7f8c8d">
+                        风扇阈值: <span id="fanThRange">30~40℃</span> ·
+                        LED阈值: <span id="ledThRange">35~45℃</span> ·
+                        风扇调整延迟: <span id="fanDelay">5</span>s
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>系统状态</h2>
+                    <div class="grid-5">
+                        <div class="metric">
+                            <div class="label">LED本次点亮</div>
+                            <div class="value" style="font-size:1rem" id="ledRunTime">--</div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">LED累计点亮</div>
+                            <div class="value" style="font-size:1rem" id="ledTotalRun">--</div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">系统总运行</div>
+                            <div class="value" style="font-size:1rem" id="sysTotalRun">--</div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">系统本次运行</div>
+                            <div class="value" style="font-size:1rem" id="sysRunTime">--</div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">上电次数</div>
+                            <div class="value" style="font-size:1.1rem" id="powerOnCount">--</div>
+                        </div>
+                    </div>
+                    <div style="margin-top:14px">
+                        <div style="font-size:0.8rem;color:#7f8c8d;margin-bottom:4px">黄/白通道占比</div>
+                        <div class="channel-bar">
+                            <div class="yellow" id="barYellow" style="width:50%"></div>
+                            <div class="white" id="barWhite" style="width:50%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>温度与散热趋势</h2>
+                <div class="chart-container">
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 设置 ========== -->
+        <div class="tab-panel" id="panel-settings">
+            <div class="grid-2">
+                <div class="card">
+                    <h2>散热阈值</h2>
+                    <div class="form-group">
+                        <label>散热器出水温度范围（低 ~ 高 ℃）</label>
+                        <div class="threshold-input">
+                            <input type="number" id="fanLTh" min="-20" max="120" value="30">
+                            <span>~</span>
+                            <input type="number" id="fanHTh" min="-20" max="120" value="40">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>LED温度范围（低 ~ 高 ℃）</label>
+                        <div class="threshold-input">
+                            <input type="number" id="ledLTh" min="-20" max="120" value="35">
+                            <span>~</span>
+                            <input type="number" id="ledHTh" min="-20" max="120" value="45">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>风扇调整延迟（秒）</label>
+                        <input type="number" id="fanDelayTime" min="1" max="3600" value="5">
+                    </div>
+                    <button class="btn btn-success" id="btnSaveThreshold">保存阈值</button>
+                </div>
+
+                <div class="card">
+                    <h2>延迟关灯与护眼</h2>
+                    <div class="form-group">
+                        <label>延迟关灯时间（秒，3~300）</label>
+                        <input type="number" id="delayedOffTime" min="3" max="300" value="60">
+                    </div>
+                    <p style="font-size:0.85rem;color:#7f8c8d">在监控页点击「延迟关灯」开关启用后，开灯到设定时长自动关灯。</p>
+                    <div class="form-group">
+                        <label>视疲劳提醒间隔（分钟，0=关闭，5~60）</label>
+                        <input type="number" id="eyeRemindInterval" min="0" max="60" value="0">
+                    </div>
+                    <p style="font-size:0.85rem;color:#7f8c8d">开灯超过该时长后，灯光以 10 秒 4 周期的明暗脉冲（当前亮度 10%~100%）提醒休息。</p>
+                    <button class="btn btn-success" id="btnSaveRemind">保存</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>PWM 参数</h2>
+                <div id="pwmContainer"></div>
+                <button class="btn btn-success" id="btnSavePWM">保存 PWM</button>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <h2>网络设置</h2>
+                    <div class="form-group">
+                        <label>设备名称</label>
+                        <input type="text" id="devicename" value="ReadingLamp">
+                    </div>
+                    <div class="form-group">
+                        <label>WiFi SSID</label>
+                        <input type="text" id="ssid" value="">
+                    </div>
+                    <div class="form-group">
+                        <label>WiFi 密码</label>
+                        <input type="password" id="wifipwd" value="">
+                    </div>
+                    <div class="form-group">
+                        <label>AP 名称</label>
+                        <input type="text" id="APName" value="ReadingLamp">
+                    </div>
+                    <div class="form-group">
+                        <label>AP 密码</label>
+                        <input type="text" id="APPwd" value="19880612">
+                    </div>
+                    <button class="btn btn-primary" id="btnScanAP">扫描 WiFi</button>
+                    <button class="btn btn-success" id="btnSaveWifi">保存并连接</button>
+                </div>
+
+                <div class="card">
+                    <h2>设备管理</h2>
+                    <div class="form-group">
+                        <label>设备密码（操作验证）</label>
+                        <input type="password" id="devicepwd" value="pengping">
+                    </div>
+                    <p style="font-size:0.85rem;color:#7f8c8d">设备密码用于所有配置修改操作的鉴权。</p>
+                    <div class="grid-2">
+                        <button class="btn btn-warning" id="btnRestart">🔄 重启设备</button>
+                        <button class="btn btn-danger" id="btnReset">⚠️ 恢复出厂</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="static/jquery.min.js"></script>
+    <script src="static/chart.umd.js"></script>
+    <script src="static/sweetalert.min.js"></script>
+    <script>
+    // ==================== 配置 ====================
+    const INVALID = -9999;
+    const PWM_CHANNELS = [
+        { key: 'fanPwm',    label: '风扇' },
+        { key: 'pumpPwm',   label: '水泵' },
+        { key: 'yellowPwm', label: '暖黄LED' },
+        { key: 'whitePwm',  label: '冷白LED' }
+    ];
+    let currentData = null;
+    let chart = null;
+    const MAX_POINTS = 60;
+    const SETTINGS_IDLE_MS = 5000;   // 设置页改动后暂停自动回填的时长（毫秒）
+    let lastSettingsEdit = 0;        // 最近一次编辑设置参数的时间戳
+
+    // ==================== 工具 ====================
+    function fmt(v, unit) {
+        if (v === undefined || v === null || v === INVALID) return '--';
+        return unit ? v + unit : v;
+    }
+    function fmtTime(s) {
+        if (!s || s < 0) return '--';
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = s % 60;
+        return h > 0 ? `${h}h${m}m` : m > 0 ? `${m}m${sec}s` : `${sec}s`;
+    }
+    function toast(title, msg, type) {
+        swal({ title, text: msg, icon: type || 'success', timer: 2000 });
+    }
+    function pwd() { return $('#devicepwd').val(); }
+
+    // ==================== 图表 ====================
+    function initChart() {
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: '散热器出水温度', data: [], borderColor: '#e74c3c', fill: false, tension: 0.15, yAxisID: 'y' },
+                    { label: 'LED温度',  data: [], borderColor: '#3498db', fill: false, tension: 0.15, yAxisID: 'y' },
+                    { label: '风扇转速',  data: [], borderColor: '#f39c12', fill: false, tension: 0.15, yAxisID: 'y1', borderDash: [4,4] },
+                    { label: '水泵转速',  data: [], borderColor: '#9b59b6', fill: false, tension: 0.15, yAxisID: 'y1', borderDash: [4,4] },
+                    { label: '高温阈值',  data: [], borderColor: '#c0392b', fill: false, borderDash: [2,4], pointRadius: 0, yAxisID: 'y' },
+                    { label: '低温阈值',  data: [], borderColor: '#27ae60', fill: false, borderDash: [2,4], pointRadius: 0, yAxisID: 'y' }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    y:  { type: 'linear', position: 'left',  title: { display: true, text: '温度 (℃)' } },
+                    y1: { type: 'linear', position: 'right', title: { display: true, text: '转速 (%)' },
+                          grid: { drawOnChartArea: false }, min: 0, max: 100 }
+                },
+                plugins: { legend: { position: 'top' } }
+            }
+        });
+    }
+
+    function pushChart(d) {
+        if (!chart) return;
+        const now = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        const ds = chart.data.datasets;
+        const pushVal = (i, v) => {
+            const arr = ds[i].data;
+            arr.push(v === INVALID || v === undefined ? null : v);
+            if (arr.length > MAX_POINTS) arr.shift();
+        };
+        pushVal(0, d.tempLM75_1);
+        pushVal(1, d.tempLM75_2);
+        pushVal(2, d.fanSpeed);
+        pushVal(3, d.pumpSpeed);
+        pushVal(4, Math.max(d.fanHThreshold || 0, d.LEDHThreshold || 0));
+        pushVal(5, Math.min(d.fanLThreshold || 0, d.LEDLThreshold || 0));
+        chart.data.labels.push(now);
+        if (chart.data.labels.length > MAX_POINTS) chart.data.labels.shift();
+        chart.update('none');
+    }
+
+    // ==================== 数据刷新 ====================
+    function refresh() {
+        $.get('/status', { mode: 'get', devicepwd: pwd() })
+            .done(function(resp) {
+                let d;
+                try { d = typeof resp === 'string' ? JSON.parse(resp) : resp; } catch(e) { return; }
+                if (d.errCode !== '0') return;
+                currentData = d;
+                updateMonitor(d);
+                syncSettingsForm(d, false);
+                pushChart(d);
+            })
+            .fail(function() { /* 静默，下次重试 */ });
+    }
+
+    function updateMonitor(d) {
+        // 设备信息
+        $('#devName').text(d.devicename || 'ReadingLamp');
+        $('#ver').text(d.ver || '--');
+        $('#wifiName').text(d.wifiname || '--');
+        $('#runTime').text(fmtTime(d.runTime));
+
+        // 灯光
+        const on = d.onOffStatus;
+        $('#ledRunTime').text(fmtTime(d.ledRunTime));
+        $('#ledTotalRun').text(fmtTime(d.ledTotalRunTime));
+        $('#sysTotalRun').text(fmtTime(d.totalRunTime));
+        $('#sysRunTime').text(fmtTime(d.runTime));
+        $('#powerOnCount').text(d.powerOnCount || 0);
+        const yPct = Math.round(d.yellowBrightness || 0);
+        const wPct = Math.round(d.whiteBrightness || 0);
+        $('#barYellow').css('width', yPct + '%');
+        $('#barWhite').css('width', wPct + '%');
+
+        // 延迟关灯开关状态
+        const delayedOn = (d.delayedOff || 0) === 1;
+        const $dbtn = $('#btnDelayedOff');
+        $dbtn.text('⏰ 延迟关灯:' + (delayedOn ? '开' : '关'))
+             .css('background', delayedOn ? '#27ae60' : '#95a5a6');
+
+        // 散热
+        const fanT = d.tempLM75_1, ledT = d.tempLM75_2;
+        $('#fanTemp').text(fmt(fanT, ''));
+        $('#ledTemp').text(fmt(ledT, ''));
+        $('#fanSpeed').text(Math.round(d.fanSpeed || 0));
+        $('#pumpSpeed').text(Math.round(d.pumpSpeed || 0));
+        $('#fanThRange').text((d.fanLThreshold||'?') + '~' + (d.fanHThreshold||'?') + '℃');
+        $('#ledThRange').text((d.LEDLThreshold||'?') + '~' + (d.LEDHThreshold||'?') + '℃');
+        $('#fanDelay').text(d.fanDelayTime || '--');
+
+        // 温度颜色
+        tempColor($('#m-fan-temp'), fanT, d.fanLThreshold, d.fanHThreshold);
+        tempColor($('#m-led-temp'), ledT, d.LEDLThreshold, d.LEDHThreshold);
+
+        // 同步控制页滑块（仅当用户未在拖动时）
+        if (!$('#brightnessSlider').is(':focus')) $('#brightnessSlider').val(d.brightness || 0);
+        if (!$('#colorTempSlider').is(':focus')) $('#colorTempSlider').val(d.colorTemperature || 0);
+        const pending = d.delayedOffPending;
+        const $sw = $('#btnSwitch');
+        $sw.removeClass('on off').addClass(pending ? 'on' : (on ? 'on' : 'off'))
+            .text(pending ? '正在延迟关灯。。。' : (on ? '💡 点击关灯' : '💡 点击开灯'));
+        applySwitchColor();
+    }
+
+    function tempColor($el, val, lo, hi) {
+        $el.removeClass('ok warn danger');
+        if (val === undefined || val === null || val === INVALID) return;
+        if (hi !== undefined && val >= hi) $el.addClass('danger');
+        else if (lo !== undefined && val > lo) $el.addClass('warn');
+        else $el.addClass('ok');
+    }
+
+    function applySwitchColor() {
+        const b = parseInt($('#brightnessSlider').val()) || 0;
+        const ct = parseInt($('#colorTempSlider').val()) || 0;
+        // 灯管为 3000K 暖黄 + 6000K 冷白混光：ct=0 全暖黄，ct=100 全冷白
+        const warmR = 255, warmG = 170, warmB = 60;   // 3000K 暖黄
+        const coolR = 170, coolG = 200, coolB = 255;  // 6000K 冷白（偏蓝，保证白字可读）
+        const t = ct / 100;
+        const r = Math.round(warmR * (1 - t) + coolR * t);
+        const g = Math.round(warmG * (1 - t) + coolG * t);
+        const bl = Math.round(warmB * (1 - t) + coolB * t);
+        const $btn = $('#btnSwitch');
+        if ($btn.hasClass('on')) {
+            $btn.css('background', `rgb(${r},${g},${bl})`);
+        } else {
+            $btn.css('background', '');
+        }
+        $('#brightnessVal').text(b);
+        $('#colorTempVal').text(3000 + Math.round(ct * 30));
+    }
+
+    // ==================== PWM 设置面板渲染 ====================
+    function renderPWMPanel() {
+        const html = PWM_CHANNELS.map(ch => `
+            <div style="border:1px solid #eee;border-radius:6px;padding:10px">
+                <div style="font-weight:600;margin-bottom:6px">${ch.label}</div>
+                <div class="pwm-grid">
+                    <div><label style="font-size:0.75rem">频率</label>
+                        <input type="number" id="${ch.key}Freq" min="1" max="78125" value="25000"></div>
+                    <div><label style="font-size:0.75rem">最小</label>
+                        <input type="number" id="${ch.key}Min" min="0" max="100" value="15"></div>
+                    <div><label style="font-size:0.75rem">最大</label>
+                        <input type="number" id="${ch.key}Max" min="0" max="100" value="100"></div>
+                </div>
+            </div>
+        `).join('');
+        $('#pwmContainer').html(html);
+    }
+
+    // force=true 时无视暂停窗口强制覆盖（首次加载使用）
+    // 非 force：编辑后 SETTINGS_IDLE_MS 内不回填，防止参数设置中途被覆盖
+    function syncSettingsForm(d, force) {
+        if (!force && Date.now() - lastSettingsEdit < SETTINGS_IDLE_MS) return;
+        const setVal = (sel, val) => {
+            const $el = $(sel);
+            if (!$el.length || val === undefined || val === null) return;
+            if (!force && $el.is(':focus')) return;
+            if (String($el.val()) !== String(val)) $el.val(val);
+        };
+        setVal('#fanLTh', d.fanLThreshold);
+        setVal('#fanHTh', d.fanHThreshold);
+        setVal('#ledLTh', d.LEDLThreshold);
+        setVal('#ledHTh', d.LEDHThreshold);
+        setVal('#fanDelayTime', d.fanDelayTime);
+        setVal('#delayedOffTime', d.delayedOffTime);
+        setVal('#eyeRemindInterval', d.eyeRemindInterval);
+        setVal('#devicename', d.devicename);
+        setVal('#ssid', d.wifiname);
+        setVal('#APName', d.APName);
+        setVal('#APPwd', d.APPwd);
+        PWM_CHANNELS.forEach(ch => {
+            setVal('#' + ch.key + 'Freq', d[ch.key + 'Freq']);
+            setVal('#' + ch.key + 'Min', d[ch.key + 'Min']);
+            setVal('#' + ch.key + 'Max', d[ch.key + 'Max']);
+        });
+    }
+
+    // 保存结束（无论成功失败）立即恢复回填，用设备当前参数刷新一次
+    function resumeSettingsSync() {
+        lastSettingsEdit = 0;
+    }
+
+    // ==================== 事件 ====================
+    function bindEvents() {
+        $('.tab').click(function() {
+            $('.tab').removeClass('active');
+            $(this).addClass('active');
+            $('.tab-panel').removeClass('active');
+            $('#panel-' + $(this).data('tab')).addClass('active');
+        });
+
+        // 设置表单：改动参数后暂停自动回填，避免输入中途被覆盖
+        $('#panel-settings').on('input change', 'input, select', function() {
+            lastSettingsEdit = Date.now();
+        });
+
+        // 开关灯
+        $('#btnSwitch').click(function() {
+            const on = !$(this).hasClass('on');
+            $.get('/light', { mode: 'set', devicepwd: pwd(), onOffStatus: on })
+                .done(r => { const d = JSON.parse(r); if (d.errCode === '0') refresh(); else toast('失败', d.msg, 'error'); })
+                .fail(() => toast('失败', '请求失败', 'error'));
+        });
+
+        // 亮度滑块
+        let brightnessTimer;
+        $('#brightnessSlider').on('input', function() {
+            applySwitchColor();
+            clearTimeout(brightnessTimer);
+            const v = $(this).val();
+            brightnessTimer = setTimeout(() => {
+                $.get('/light', { mode: 'set', devicepwd: pwd(), brightness: v })
+                    .fail(() => {});
+            }, 150);
+        });
+
+        // 色温滑块
+        let ctTimer;
+        $('#colorTempSlider').on('input', function() {
+            applySwitchColor();
+            clearTimeout(ctTimer);
+            const v = $(this).val();
+            ctTimer = setTimeout(() => {
+                $.get('/light', { mode: 'set', devicepwd: pwd(), colorTemperature: v })
+                    .fail(() => {});
+            }, 150);
+        });
+
+        // 快捷场景
+        $('[data-scene]').click(function() {
+            const scene = $(this).data('scene');
+            const params = { mode: 'set', devicepwd: pwd() };
+            if (scene === 'warm')  { params.colorTemperature = 10; params.brightness = 80; }
+            if (scene === 'neutral'){ params.colorTemperature = 50; params.brightness = 80; }
+            if (scene === 'cool')  { params.colorTemperature = 90; params.brightness = 80; }
+            $.get('/light', params).done(() => setTimeout(refresh, 200));
+        });
+
+        // 延迟关灯开关
+        $('#btnDelayedOff').click(function() {
+            const cur = ($(this).text().indexOf('开') >= 0) ? 1 : 0;
+            const next = cur ? 0 : 1;
+            $.get('/status', { mode: 'set', devicepwd: pwd(), delayedOff: next })
+                .done(r => { const d = JSON.parse(r); if (d.errCode === '0') refresh(); else toast('失败', d.msg, 'error'); })
+                .fail(() => toast('失败', '请求失败', 'error'));
+        });
+
+        // 保存阈值
+        $('#btnSaveThreshold').click(function() {
+            $.get('/status', {
+                mode: 'set', devicepwd: pwd(),
+                fanLThreshold: $('#fanLTh').val(), fanHThreshold: $('#fanHTh').val(),
+                LEDLThreshold: $('#ledLTh').val(), LEDHThreshold: $('#ledHTh').val(),
+                fanDelayTime: $('#fanDelayTime').val()
+            }).done(r => { const d = JSON.parse(r); resumeSettingsSync(); refresh(); toast(d.errCode === '0' ? '成功' : '失败', d.msg || '', d.errCode === '0' ? 'success' : 'error'); })
+              .fail(() => toast('失败', '请求失败', 'error'));
+        });
+
+        // 保存延迟关灯与护眼
+        $('#btnSaveRemind').click(function() {
+            $.get('/status', {
+                mode: 'set', devicepwd: pwd(),
+                delayedOffTime: $('#delayedOffTime').val(),
+                eyeRemindInterval: $('#eyeRemindInterval').val()
+            }).done(r => { const d = JSON.parse(r); resumeSettingsSync(); refresh(); toast(d.errCode === '0' ? '成功' : '失败', d.msg || '', d.errCode === '0' ? 'success' : 'error'); })
+              .fail(() => toast('失败', '请求失败', 'error'));
+        });
+
+        // 保存 PWM
+        $('#btnSavePWM').click(function() {
+            const params = { mode: 'set', devicepwd: pwd() };
+            PWM_CHANNELS.forEach(ch => {
+                params[ch.key + 'Freq'] = $('#' + ch.key + 'Freq').val();
+                params[ch.key + 'Min'] = $('#' + ch.key + 'Min').val();
+                params[ch.key + 'Max'] = $('#' + ch.key + 'Max').val();
+            });
+            $.get('/status', params).done(r => { const d = JSON.parse(r); resumeSettingsSync(); refresh(); toast(d.errCode === '0' ? '成功' : '失败', d.msg || '', d.errCode === '0' ? 'success' : 'error'); })
+              .fail(() => toast('失败', '请求失败', 'error'));
+        });
+
+        // 扫描 WiFi
+        $('#btnScanAP').click(function() {
+            $.get('/scanap').done(r => {
+                const list = JSON.parse(r);
+                if (Object.keys(list).length === 0) { toast('提示', '未找到 WiFi', 'warning'); return; }
+                const ssids = Object.keys(list).sort((a,b) => list[b] - list[a]);
+                swal({
+                    title: '选择 WiFi',
+                    content: { element: 'select', attributes: { id: 'apSelect' } },
+                    buttons: ['取消', '选择']
+                }).then(ok => {
+                    if (ok) { $('#ssid').val($('#apSelect').val()); toast('已选择', $('#apSelect').val(), 'success'); }
+                });
+                const sel = document.getElementById('apSelect');
+                ssids.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s; opt.textContent = `${s} (${list[s]}dBm)`;
+                    sel.appendChild(opt);
+                });
+            }).fail(() => toast('失败', '扫描失败', 'error'));
+        });
+
+        // 保存 WiFi
+        $('#btnSaveWifi').click(function() {
+            $.get('/setwifi', {
+                ssid: $('#ssid').val(), pwd: $('#wifipwd').val(),
+                devicename: $('#devicename').val(),
+                APName: $('#APName').val(), APPwd: $('#APPwd').val(),
+                devicepwd: pwd()
+            }).done(r => { const d = JSON.parse(r); toast(d.errCode === '0' ? '成功' : '失败', d.msg || (d.errCode === '0' ? 'WiFi 已保存，设备将重启' : ''), d.errCode === '0' ? 'success' : 'error'); })
+              .fail(() => toast('失败', '请求失败', 'error'));
+        });
+
+        // 重启
+        $('#btnRestart').click(function() {
+            swal({ title: '确认重启?', icon: 'warning', buttons: ['取消', '重启'] }).then(ok => {
+                if (!ok) return;
+                $.get('/restart', { devicepwd: pwd() }).done(r => { const d = JSON.parse(r); toast(d.errCode === '0' ? '成功' : '失败', d.msg || '', d.errCode === '0' ? 'success' : 'error'); });
+            });
+        });
+
+        // 恢复出厂
+        $('#btnReset').click(function() {
+            swal({ title: '确认恢复出厂?', text: '所有配置将被清除！', icon: 'error', buttons: ['取消', '确认'] }).then(ok => {
+                if (!ok) return;
+                $.get('/reset', { devicepwd: pwd() }).done(r => { const d = JSON.parse(r); toast(d.errCode === '0' ? '成功' : '失败', d.msg || '', d.errCode === '0' ? 'success' : 'error'); });
+            });
+        });
+    }
+
+    // ==================== 启动 ====================
+    $(function() {
+        renderPWMPanel();
+        initChart();
+        bindEvents();
+        // 首次加载后填充设置表单
+        $.get('/status', { mode: 'get', devicepwd: pwd() }).done(function(resp) {
+            let d; try { d = JSON.parse(resp); } catch(e) { return; }
+            if (d.errCode === '0') { currentData = d; syncSettingsForm(d, true); updateMonitor(d); pushChart(d); }
+        });
+        setInterval(refresh, 2000);
+    });
+    </script>
+</body>
+</html>
