@@ -999,3 +999,102 @@ Invoke-RestMethod "http://192.168.30.74/status?devicepwd=pengping&mode=get" -Hea
 | 2 | **编码器按键（KEY）** | GPIO1 | 短按切换开关灯；长按 + 旋转调色温；注意 GPIO1 在部分 S3 核心板为 U0TXD，若接 USB-串口桥可能冲突（已知问题 #7） | 高 |
 | 3 | **编码器内部上拉有效性** | GPIO39/40/1 | 确认 `Pin.PULL_UP` 在 S3 上生效，断线时为高电平（静止态），旋转时边沿触发正常 | 中 |
 
+---
+
+## 19. 待实施优化：编码器驱动升级（machine.Encoder 硬件 PCNT）
+
+> **状态：待实施** — 当前先完成第 18 节硬件验证，确认编码器硬件正常后再启动本优化。
+> **决策日期：2026-11-08**
+
+### 19.1 背景与动机
+
+当前编码器驱动使用第三方库 `lib/rotary/`（Mike Teachman micropython-rotary），采用软件 GPIO 中断 + 8 状态正交状态机解码。经评估，驱动本身算法正确，但存在以下可优化点：
+
+| # | 问题 | 影响 |
+|---|------|------|
+| 1 | 占用 2 个 GPIO 中断（CLK/DT 双边沿） | 主循环 20Hz 被频繁打断，影响调度稳定性 |
+| 2 | 无硬件去抖 | 靠状态机容错，毛刺仍可能产生误计数 |
+| 3 | 分辨率低（全步进 = 4 边沿 1 计数） | 旋钮调节粒度粗 |
+| 4 | 按键（KEY）无软件去抖 | 一次按下可能触发多次开关灯（原有 bug，与驱动无关但一并修复） |
+| 5 | 快速旋转时 `delt` 无单 tick 限幅 | 亮度可能一次跳变 10~20% |
+
+### 19.2 方案：使用 MicroPython 官方 `machine.Encoder`
+
+MicroPython **v1.27+** 原生提供 `machine.Encoder` 类（项目固件 v1.29.0 已支持），基于 ESP32-S3 硬件 PCNT（脉冲计数器）外设实现正交解码。
+
+**核心代码形态（待实施时写入 `driver/bsp.py`）：**
+
+```python
+from machine import Pin, Encoder
+
+# 替换 RotaryIRQ 实例化
+self.knob = Encoder(
+    0,                                      # PCNT 单元 id（ESP32-S3 有 8 个，0~7）
+    Pin(self.PIN_ROTARY_CLK, Pin.IN, Pin.PULL_UP),
+    Pin(self.PIN_ROTARY_DT, Pin.IN, Pin.PULL_UP),
+    filter_ns=1000,                         # 硬件 glitch filter，去抖
+    phases=4                                # 4x 正交解码，分辨率 x4
+)
+# getknob() 接口不变，仍返回 (self.knob, self.knobKey.value())
+```
+
+### 19.3 方案对比
+
+| 维度 | RotaryIRQ（当前） | machine.Encoder（待实施） |
+|------|-------------------|--------------------------|
+| 解码实现 | 软件 IRQ + 状态机 | 硬件 PCNT |
+| CPU 中断开销 | 2 个 IRQ，每边沿触发 | **零中断**，硬件自动计数 |
+| 去抖 | 无（状态机容错） | **`filter_ns` 硬件滤波** |
+| 分辨率 | 1x（4 边沿 = 1 计数） | 1x / 2x / 4x 可选（推荐 4x） |
+| 丢脉冲风险 | IRQ 阻塞时可能丢 | **硬件计数，永不丢** |
+| 计数器位宽 | 任意精度整数 | 16 位有符号（±32768 翻转） |
+| 第三方依赖 | `lib/rotary/`（2 个文件） | **官方内置 API，无依赖** |
+| 按键处理 | 单独 KEY 引脚 | 单独 KEY 引脚（不变） |
+
+**计数器溢出说明**：PCNT 为 16 位有符号，value 会在 ±32768 翻转。但业务逻辑只计算 `delt = current - last`，20Hz 轮询间隔（50ms）内不可能旋转 32767 格，因此 delt 计算永远正确，溢出不影响调光。
+
+### 19.4 改动清单（核心业务逻辑不变）
+
+> **关键结论**：`LightControllFSM.processKnob()` 的 if-elif 分支结构一行都不用改，仅调整步进系数。
+
+| 文件 | 改动内容 | 性质 |
+|------|----------|------|
+| `driver/bsp.py` | `RotaryIRQ` → `machine.Encoder`；`getknob()` 接口不变（仍返回 `(obj, key_level)`） | 驱动替换 |
+| `domain/LightControllFSM.py` | 步进系数 `delt * 2` → `delt * 0.5`（phases=4 时，保持每机械格 2% 亮度） | 参数调整 |
+| `domain/LightControllFSM.py` | 按键去抖：20ms 窗口内忽略重复下降沿（修复原有 bug） | 缺陷修复 |
+| `lib/rotary/` | 整个目录可删除 | 清理依赖 |
+
+**步进系数换算表**（保持"1 机械格 = 2% 亮度"不变）：
+
+| phases 参数 | 分辨率倍率 | 亮度步进系数 |
+|-------------|-----------|-------------|
+| 1 | 1x | `* 2`（与当前相同） |
+| 2 | 2x | `* 1` |
+| 4（推荐） | 4x | `* 0.5` |
+
+### 19.5 前置条件（必须先完成）
+
+1. **第 18 节硬件验证通过**：编码器 CLK/DT/KEY 在当前 rotary 库驱动下功能正常，排除硬件接线问题
+2. **固件 API 可用性确认**：在 REPL 中执行 `from machine import Encoder` 确认 v1.29.0 固件已启用该类
+3. **PCNT filter 范围确认**：实测 `filter_ns` 参数的有效范围（PCNT filter 时钟约 80MHz，最大约 1023 周期 ≈ 12.8μs）
+
+### 19.6 实施步骤（待启动时按序执行）
+
+1. REPL 验证 `machine.Encoder` 可用，记录可用的 PCNT id 与 filter 范围
+2. 修改 `bsp.py`：替换编码器实例化，保持 `getknob()` 接口不变
+3. 修改 `LightControllFSM.py`：调整步进系数 + 增加按键去抖
+4. 上传测试，验证：旋转方向、每格亮度变化、按键开关灯、快速旋转无跳变
+5. 验证通过后删除 `lib/rotary/` 目录
+6. 更新本章节状态为"已实施"
+
+### 19.7 验证标准
+
+| 验证项 | 预期结果 |
+|--------|----------|
+| 顺时针旋转 | 亮度增加，每格约 2% |
+| 逆时针旋转 | 亮度减少，每格约 2% |
+| 按住 + 旋转 | 色温变化，每格约 2% |
+| 短按按键 | 开关灯切换一次，无重复触发 |
+| 快速旋转 | 亮度平滑变化，无突变（delt 限幅生效） |
+| 主循环频率 | `loopHz` 稳定在 20Hz 附近，无 IRQ 打断导致的掉速 |
+
