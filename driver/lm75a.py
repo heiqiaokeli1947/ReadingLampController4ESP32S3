@@ -21,14 +21,23 @@ class LM75A:
         if self._i2c.scan().count(self._address) == 0:
             raise OSError('LM75A not found at I2C address {:#x}'.format(self._address))
     def config(self, shutdown=None, os_mode=None, os_polarity=None, os_fault_queue=None):
+        # 修复：原实现仅在 os_fault_queue 不为 None 时才写寄存器，
+        # 导致单独设置 shutdown/os_mode/os_polarity 时配置不生效。
+        # 改为：只要有任一参数非 None，就更新 _config 并写入硬件。
+        changed = False
         if shutdown is not None:
             self._config = (self._config & ~1) | (shutdown & 1)
+            changed = True
         if os_mode is not None:
             self._config = (self._config & ~2) | ((os_mode << 1) & 2)
+            changed = True
         if os_polarity is not None:
             self._config = (self._config & ~4) | ((os_polarity << 2) & 4)
+            changed = True
         if os_fault_queue is not None:
             self._config = (self._config & ~24) | ((os_fault_queue << 3) & 24)
+            changed = True
+        if changed:
             self._buf1[0] = self._config
             self._i2c.writeto_mem(self._address, _LM75A_CONF, self._buf1)
     def temp(self):

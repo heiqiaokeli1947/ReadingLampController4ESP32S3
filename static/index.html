@@ -600,8 +600,8 @@
         $('#btnScanAP').click(function() {
             $.get('/scanap').done(r => {
                 const list = JSON.parse(r);
-                if (Object.keys(list).length === 0) { toast('提示', '未找到 WiFi', 'warning'); return; }
-                const ssids = Object.keys(list).sort((a,b) => list[b] - list[a]);
+                if (list.length === 0) { toast('提示', '未找到 WiFi', 'warning'); return; }
+                const sorted = list.sort((a, b) => b.rssi - a.rssi);
                 swal({
                     title: '选择 WiFi',
                     content: { element: 'select', attributes: { id: 'apSelect' } },
@@ -610,9 +610,9 @@
                     if (ok) { $('#ssid').val($('#apSelect').val()); toast('已选择', $('#apSelect').val(), 'success'); }
                 });
                 const sel = document.getElementById('apSelect');
-                ssids.forEach(s => {
+                sorted.forEach(item => {
                     const opt = document.createElement('option');
-                    opt.value = s; opt.textContent = `${s} (${list[s]}dBm)`;
+                    opt.value = item.ssid; opt.textContent = `${item.ssid} (${item.rssi}dBm)`;
                     sel.appendChild(opt);
                 });
             }).fail(() => toast('失败', '扫描失败', 'error'));

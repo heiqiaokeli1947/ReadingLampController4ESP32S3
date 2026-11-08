@@ -111,6 +111,7 @@ pumpFSMInstance = pumpFSM.FSM(bspInstance, systemConfig)
 lastMainTick = utime.ticks_ms()
 lastFanTick = 0
 lastPumpTick = 0
+lastSensorTick = 0
 lastWifiCheckTick = 0
 lastGCTick = 0
 lastSaveTick = 0
@@ -341,7 +342,8 @@ def validateSetArgs(args):
     def effVal(key, conv):
         if key in args:
             return conv(args[key])
-        return conv(systemConfig[key])
+        # 用 .get 兜底，避免 systemConfig 缺 key 时抛 KeyError
+        return conv(systemConfig.get(key, 0))
 
     def checkPair(a, b, conv):
         try:
@@ -608,6 +610,8 @@ while True:
             reloadAllConfig()
         except Exception as e:
             log("[ERROR] reloadAllConfig failed:{}".format(e))
+            # 重载失败则保留标志，下一 tick 重试（避免 FSM/BSP 与 systemConfig 状态不一致）
+            _pendingConfigReload = True
 
     # 灯光 FSM（高频处理旋钮）
     try:
@@ -631,11 +635,13 @@ while True:
         except Exception as e:
             log("[ERROR] PumpFSM.run failed:{}".format(e))
 
-    # 传感器读取（1Hz，由 BSP 内部节流；I2C 故障已在 BSP 内捕获）
-    try:
-        bspInstance.readSensors()
-    except Exception as e:
-        log("[ERROR] bsp.readSensors failed:{}".format(e))
+    # 传感器读取（1Hz 调度，BSP 内部仍有节流作为双重保险；I2C 故障已在 BSP 内捕获）
+    if utime.ticks_diff(now, lastSensorTick) >= FSM_SLOW_INTERVAL_MS:
+        lastSensorTick = now
+        try:
+            bspInstance.readSensors()
+        except Exception as e:
+            log("[ERROR] bsp.readSensors failed:{}".format(e))
 
     # WiFi 重连（30s，normal 模式；后台线程执行，避免 1s 射频复位阻塞旋钮响应）
     if systemConfig["mode"] == "normal" and \

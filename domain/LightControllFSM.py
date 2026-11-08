@@ -187,21 +187,21 @@ class FSM:
         v = int(max(0, min(100, value)))
         self.brightness = v
         if v == 0:
-            # 亮度滑到 0 视为关灯
-            self.onOffStatus = False
-            self.bspInstance.setLightStatus(False)
-            self._delayedOffPending = False
-            self._onSinceMs = 0
+            # 亮度为 0 等同于关灯：走 setOnOff(auto=True) 完整关灯逻辑，
+            # 确保 _continuousOnMs/_eyeRemindActive 清零、ledTotalRunTime 落盘、
+            # 临时亮度清零，与旋钮/Web 关灯行为一致。auto=True 绕过延迟关灯倒计时。
+            self.setOnOff(False, auto=True)
         else:
             wasOff = not self.onOffStatus
-            self.onOffStatus = True
-            self.bspInstance.setLightStatus(True)
+            if not self.onOffStatus:
+                self.onOffStatus = True
+                self.bspInstance.setLightStatus(True)
             if wasOff or self._delayedOffPending:
                 # 开灯或取消延迟关灯倒计时：重新开始倒计时并清理状态
                 self._onSinceMs = self.runTimeCounterMs
                 self._eyeRemindActive = False
                 self._delayedOffPending = False
-        self._recalcBrightness()
+            self._recalcBrightness()
         if self.lastBrightness != v:
             db.save({"brightness": str(v)})
             self.lastBrightness = v
@@ -237,8 +237,7 @@ class FSM:
             # 按住旋钮旋转 → 色温调节
             delt = knob.value() - self.lastKnobValue
             self.colorTemperature = max(0, min(100, self.colorTemperature + delt * 2))
-            self.yellowBrightness = self.brightness * (100 - self.colorTemperature) / 100
-            self.whiteBrightness = self.brightness * self.colorTemperature / 100
+            self._recalcBrightness()
             self.lastKnobValue = knob.value()
             self.lastKnobKey = knobKey
 
@@ -246,8 +245,7 @@ class FSM:
             # 不按旋钮旋转 → 亮度调节
             delt = knob.value() - self.lastKnobValue
             self.brightness = max(0, min(100, self.brightness + delt * 2))
-            self.yellowBrightness = self.brightness * (100 - self.colorTemperature) / 100
-            self.whiteBrightness = self.brightness * self.colorTemperature / 100
+            self._recalcBrightness()
             self.lastKnobValue = knob.value()
             self.lastKnobKey = knobKey
 

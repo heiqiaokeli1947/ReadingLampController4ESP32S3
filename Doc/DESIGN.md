@@ -240,7 +240,17 @@ for ch, key in (...):
 │        ▼                ▼                       ▼                 │
 │  ┌───────────────────────────────────────────────────────────┐   │
 │  │                    domain 业务层                           │   │
-│  │  LightControllFSM │ FanFSM │ PumpFSM │ sensorData │ DBUtils│   │
+│  │  ┌─────────────────────────────────────────────────────┐   │   │
+│  │  │         ThermalControlFSM (温控基类)                 │   │   │
+│  │  │  EMA 滤波 + 滞回带 + 渐变限速 + 停机逻辑              │   │   │
+│  │  └─────────────────────────────────────────────────────┘   │   │
+│  │           ▲                    ▲                          │   │
+│  │           │继承                │继承                      │   │
+│  │  ┌────────┴────────┐  ┌───────┴────────┐                  │   │
+│  │  │    FanFSM       │  │   PumpFSM      │                  │   │
+│  │  │  (二级散热)      │  │  (一级散热)     │                  │   │
+│  │  └─────────────────┘  └────────────────┘                  │   │
+│  │  LightControllFSM │ sensorData │ DBUtils │ wifi │ ntpSync │   │
 │  └──────────────────────────┬────────────────────────────────┘   │
 │                             │                                    │
 │                             ▼                                    │
@@ -399,7 +409,9 @@ step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
 
 开灯时（`setOnOff(True)`）若 `brightness <= 0` 则兜底置 30，否则直接使用恢复值——实现"下次开机开灯即恢复上次关灯前亮度"。
 
-**亮度滑到 0 的语义：** `setBrightness(0)` 等同于关灯：置 `onOffStatus=False`、写 PWM=0、清零 `_onSinceMs` 与 `_delayedOffPending`。这保证亮度滑块拉到底端时灯真正熄灭，且不会残留延迟关灯倒计时状态。`setBrightness(v>0)` 时若灯原已关闭或正处于延迟关灯待触发状态，则重置 `_onSinceMs` 重新开始倒计时。
+**亮度滑到 0 的语义：** `setBrightness(0)` 等同于关灯：**调用 `setOnOff(False, auto=True)` 走完整关灯逻辑**，包括：置 `onOffStatus=False`、写 PWM=0、清零 `_continuousOnMs`、重置 `_eyeRemindActive`、清零 `_delayedOffPending`、立即落盘 `ledTotalRunTime`。这保证亮度滑块拉到底端时灯真正熄灭，且累计点亮时长、护眼提醒状态、延迟关灯倒计时全部正确清理，与旋钮/Web 关灯行为完全一致。`auto=True` 绕过延迟关灯倒计时（亮度为 0 即立即关灯）。
+
+**历史 Bug（已修复）：** 原实现直接置 `onOffStatus=False` 而不调用 `setOnOff`，导致 `_continuousOnMs` 未清零、`_eyeRemindActive` 未重置、`ledTotalRunTime` 未落盘。修复后 `setBrightness(0)` 与手动关灯走同一路径。
 
 **累计点亮时长：** `totalRunTimeMs` 仅在 `onOffStatus=True` 时累加（`run()` 中 `if self.onOffStatus: totalRunTimeMs += delta`），关灯时停止计时。该值持久化到 DB 键 `ledTotalRunTime`，采用**双触发落盘策略**降低 flash 磨损：
 1. 定时节流：`saveData()` 中距上次保存 ≥ 60s 才写一次；
@@ -419,7 +431,30 @@ step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
 
 **配置热更新：** `reloadConfig` 置 `_configDirty=True`，`fitPower` 强制重应用两路 PWM（用新的 min/max 重新计算 duty）。
 
-### 5.4 FanFSM — 风扇控制状态机（二级散热）
+### 5.4 ThermalControlFSM — 温控基类（新增）
+
+**设计目的：** 消除 FanFSM 与 PumpFSM 间 95% 的重复代码。两个 FSM 仅在传感器源、阈值键、PWM 通道、停机条件上有差异，核心控制算法（EMA 滤波 + 滞回带 + 渐变限速 + 停机逻辑）完全一致。
+
+**基类封装：** `domain/ThermalControlFSM.py` 提供完整的温控 FSM 实现，子类通过 `params` dict 注入差异点：
+
+| 参数 | FanFSM | PumpFSM | 说明 |
+|------|--------|---------|------|
+| `name` | 'Fan' | 'Pump' | 日志标签 |
+| `temp_getter` | `lambda: sensorData.LM75FanTemp` | `lambda: sensorData.LM75LedTemp` | 温度数据源 |
+| `h_key` / `l_key` | fanHThreshold / fanLThreshold | LEDHThreshold / LEDLThreshold | 阈值配置键 |
+| `pwm_ch` / `pwm_prefix` | fanPwm / fanPwm | pumpPwm / pumpPwm | PWM 通道与配置前缀 |
+| `stop_when_light_off` | True | False | 关灯是否立即停转 |
+| `run_time_db_key` | fanTotalRunTime | pumpTotalRunTime | 累计运行时长 DB 键 |
+| `speed_key` / `temp_key` | fanSpeed / fanTemp | pumpSpeed / ledTemp | 状态字段名 |
+
+**继承优势：**
+- 改一处自动同步另一处（如修复限速逻辑、调整滤波系数）
+- 每个子类仅 ~20 行（原 ~200 行），代码量减少 90%
+- 新增温控设备时只需实例化基类并传入不同 params
+
+### 5.5 FanFSM — 风扇控制状态机（二级散热）
+
+继承自 `ThermalControlFSM`，差异点通过 `params` 注入。
 
 **状态枚举：** INIT(0) → EVAL(1)（每 tick 评估温度并按限速调整 PWM）
 
@@ -458,22 +493,19 @@ step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
 
 **`applySpeedLimit` 的 elapsed 钳制（防主循环阻塞导致跳变）**：`elapsed = ticks_diff(runTimeCounterMs, lastSpeedAdjustMs)`。正常 1Hz tick 下 `elapsed ≈ 1000ms`，`maxChange = 25%`。但主循环被 GC（5min）、WiFi 射频重连、配置重载等阻塞时，`runTimeCounterMs` 会一次性累加 2~5s，导致 `elapsed` 异常增大、`maxChange` 超过 100，`appliedSpeed` 直接跳到 `targetSpeed`，PWM 突变。**修复：将 `elapsed` 钳制到 1500ms**（单 tick 最大变化 37.5%），保证即使主循环长时间阻塞，转速也按限速渐变。`lastSpeedAdjustMs` 每 tick 顶部刷新为当前 `runTimeCounterMs`，下一轮 `elapsed` 回归正常值。
 
-### 5.5 PumpFSM — 水泵控制状态机（一级散热）
+### 5.6 PumpFSM — 水泵控制状态机（一级散热）
 
-**结构与 FanFSM 基本一致**，区别仅在于：
-- 监测灯板温度（LM75A 0x4F）
-- 阈值为 `LEDHThreshold`(45) / `LEDLThreshold`(35)
-- 控制 `pumpPwm` 通道
-- **不判断灯光开关**：水泵串联在灯板与散热器之间，关灯后仍继续循环带走灯板余热，直到灯板温度降到 `LEDLThreshold - 1.5` 以下才停转
-- 传感器失效（-9999）时：开灯全速保护，关灯不空转
+继承自 `ThermalControlFSM`，差异点通过 `params` 注入。
 
-**与 FanFSM 的唯一行为差异就在停机条件**：FanFSM 关灯立刻写 PWM=0（不经过限速，立即静音）；PumpFSM 完全忽略灯光状态，只看灯板温度。两者算法、参数、字段命名完全对称，改一处时记得同步另一处。
+**与 FanFSM 的核心差异：** **不判断灯光状态**（`stop_when_light_off=False`），水泵串联在灯板与散热器之间，关灯后仍继续循环带走灯板余热，直到灯板温度降到 `LEDLThreshold - 1.5` 以下才停转（停机完全由温度决定）。
 
-**水泵停机时的 `lastSpeedAdjustMs` 复位（与风扇的差异）**：风扇关灯时每 tick 走 `setDeviceToReadyStatus()`，该函数会把 `lastSpeedAdjustMs` 刷新为当前 `runTimeCounterMs`，因此风扇重新启动时 `elapsed` 总是约 1 个 tick。水泵正常运行中不调用 `setDeviceToReadyStatus`，仅靠 `applySpeedLimit` 顶部的 `lastSpeedAdjustMs = runTimeCounterMs` 刷新。为保证水泵停机后再次启动时也能从小步长平滑爬升，`applySpeedLimit` 末尾追加：当 `targetSpeed == 0 and appliedSpeed == 0` 时，再次确认 `lastSpeedAdjustMs = runTimeCounterMs`（对齐风扇 `setDeviceToReadyStatus` 的复位语义）。此逻辑为 PumpFSM 独有，FanFSM 因 `setDeviceToReadyStatus` 已覆盖而无需重复。
+**传感器失效（-9999）时：** 开灯全速保护，关灯不空转。
 
-**elapsed 钳制**：与 FanFSM 完全相同，`applySpeedLimit` 中将 `elapsed` 钳制到 1500ms，防止主循环阻塞导致 PWM 跳变。详见 5.4 节。
+**水泵停机时的 `lastSpeedAdjustMs` 复位（与风扇的差异）**：风扇关灯时每 tick 走 `setDeviceToReadyStatus()`，该函数会把 `lastSpeedAdjustMs` 刷新为当前 `runTimeCounterMs`，因此风扇重新启动时 `elapsed` 总是约 1 个 tick。水泵正常运行中不调用 `setDeviceToReadyStatus`，仅靠 `applySpeedLimit` 顶部的 `lastSpeedAdjustMs = runTimeCounterMs` 刷新。为保证水泵停机后再次启动时也能从小步长平滑爬升，`applySpeedLimit` 末尾追加：当 `targetSpeed == 0 and appliedSpeed == 0` 时，再次确认 `lastSpeedAdjustMs = runTimeCounterMs`（对齐风扇 `setDeviceToReadyStatus` 的复位语义）。
 
-### 5.6 sensorData — 全局数据容器
+**elapsed 钳制**：与 FanFSM 完全相同，`applySpeedLimit` 中将 `elapsed` 钳制到 1500ms，防止主循环阻塞导致 PWM 跳变。
+
+### 5.7 sensorData — 全局数据容器
 
 **单例，property 访问。** 当前字段：
 
@@ -1097,4 +1129,136 @@ self.knob = Encoder(
 | 短按按键 | 开关灯切换一次，无重复触发 |
 | 快速旋转 | 亮度平滑变化，无突变（delt 限幅生效） |
 | 主循环频率 | `loopHz` 稳定在 20Hz 附近，无 IRQ 打断导致的掉速 |
+
+---
+
+## 20. 代码优化记录（2026-11-09）
+
+### 20.1 优化概述
+
+本次优化针对系统架构、功能、性能、可靠性四个维度，共实施 10 项改进，硬件验证全部通过。
+
+| 维度 | 优化项数 | 关键改进 |
+|------|----------|----------|
+| 可靠性 | 3 | setBrightness(0) 修复、lm75a.config() 修复、reloadAllConfig 异常恢复 |
+| 架构 | 2 | FanFSM/PumpFSM 基类提取、BSP 延迟导入 |
+| 性能 | 3 | fileUtils.isFileExist 优化、readSensors 调度优化、WiFi scanAP 修复 |
+| 代码质量 | 2 | processKnob 重复代码清理、wifi.py 注释清理 |
+
+**代码变化：** +99 行 / -452 行（净减 353 行），主要来自 FanFSM/PumpFSM 基类提取。
+
+### 20.2 高优先级修复（可靠性 Bug）
+
+#### 1. `setBrightness(0)` 关灯逻辑不完整
+
+**问题：** 亮度滑到 0 时直接置 `onOffStatus=False`，未走 `setOnOff` 完整流程，导致：
+- `_continuousOnMs` 未清零（视疲劳提醒计时不准）
+- `_eyeRemindActive` 未重置（护眼状态残留）
+- `ledTotalRunTime` 未落盘（累计点亮时长丢失）
+
+**修复：** 改为调用 `setOnOff(False, auto=True)`，复用完整关灯逻辑。`auto=True` 绕过延迟关灯倒计时。
+
+**验证：** 硬件测试通过，ledTotalRunTime 正确落盘（30483s），再次开灯正常恢复。
+
+#### 2. `lm75a.config()` 部分参数不写寄存器
+
+**问题：** 原实现仅在 `os_fault_queue` 非 None 时才 `writeto_mem`，单独设置 `shutdown/os_mode/os_polarity` 不生效。
+
+**修复：** 引入 `changed` 标志，任一参数非 None 即写入硬件。
+
+#### 3. `reloadAllConfig` 异常后状态不一致
+
+**问题：** 异常时 `_pendingConfigReload` 已清但 FSM/BSP 未更新，systemConfig 已被 Web 线程修改。
+
+**修复：** 异常时将标志置回 `True`，下一 tick 重试，避免配置丢失。
+
+### 20.3 架构优化
+
+#### 4. FanFSM/PumpFSM 基类提取
+
+**问题：** 两个 FSM 95% 代码重复，改一处需同步另一处，维护风险高。
+
+**修复：** 新增 `domain/ThermalControlFSM.py` 基类，封装 EMA 滤波 + 滞回带 + 渐变限速全部逻辑。子类通过 `params` dict 注入差异点。
+
+**效果：** 每个 FSM 从 ~200 行缩减到 ~20 行，代码量减少 90%，改一处自动同步。
+
+#### 5. BSP 延迟导入死传感器驱动
+
+**问题：** 启动时导入 bmp280/hdc1080/bh1750/pms5003，浪费 RAM 和导入时间。
+
+**修复：** 注释顶层导入，硬件接入后在 handler 内按需 import。
+
+### 20.4 性能优化
+
+#### 6. `fileUtils.isFileExist` 优化
+
+**问题：** 每次 `uos.listdir(dir)` 遍历整个目录。
+
+**修复：** 改用 `uos.stat()` + `try/except OSError`，O(1) 判定。
+
+#### 7. `readSensors` 调度优化
+
+**问题：** 20Hz 主循环中空转（内部 1Hz 节流）。
+
+**修复：** 主循环用 1Hz 调度，BSP 内部节流保留作双重保险。
+
+#### 8. `wifi.scanAP()` 同名覆盖修复
+
+**问题：** 返回 dict 用 SSID 作 key，同名 AP 被覆盖。
+
+**修复：** 改为 `list[dict]`，每项含 `ssid` 和 `rssi`。同步修改前端 `index.html`。
+
+### 20.5 代码质量优化
+
+#### 9. `processKnob` 重复代码清理
+
+**问题：** 3 处重复计算 `yellowBrightness/whiteBrightness`。
+
+**修复：** 统一调用 `_recalcBrightness()`。
+
+#### 10. wifi.py 清理 + 健壮性
+
+- 删除未使用的 `startBroadcastAP`
+- 清理 10+ 行注释掉的代码
+- `getAPIP` 未激活时返回 `None`（与 `getStationIP` 一致）
+- `validateSetArgs.effVal` 改用 `systemConfig.get(key, 0)` 兜底防 `KeyError`
+
+### 20.6 硬件验证结果
+
+| 测试项 | 结果 | 关键数据 |
+|--------|------|----------|
+| 模块导入 | ✅ 8/8 通过 | ThermalControlFSM/FanFSM/PumpFSM/LightFSM/bsp/lm75a/wifi/fileUtils |
+| FSM 实例化 | ✅ 通过 | 状态字段完整，配置加载正常 |
+| 编码器 | ✅ 正常 | GPIO40/39 初始化成功，值读取正常 |
+| PWM 通道 | ✅ 4/4 通过 | fan/pump/yellow/white 占空比设置正常 |
+| LM75A 传感器 | ✅ 正常 | 0x4A=24.0°C, 0x4F=24.1°C |
+| setBrightness(0) | ✅ 修复确认 | 关灯逻辑完整，数据落盘 |
+| FSM 集成运行 | ✅ 5 秒无异常 | 温度滤波、阈值判断、配置热更新正常 |
+| 配置热更新 | ✅ 生效 | fanHThreshold 40→35 立即生效 |
+| 30 秒稳定性 | ✅ 600 循环 0 错误 | 平均 19.4Hz，内存变化 -240B |
+
+### 20.7 待手动验证项
+
+| 项目 | 原因 | 建议 |
+|------|------|------|
+| 编码器物理旋转 | 测试时无操作 | 手动旋转验证方向/步进 |
+| 编码器按键 | 测试时无操作 | 短按验证开关灯 |
+| 温度阈值触发 | 环境温度低于阈值 | 加热灯板验证风扇/水泵启动 |
+| Web 接口完整流程 | 需浏览器操作 | 访问配置页面验证保存/重载 |
+
+### 20.8 相关文件变更
+
+| 文件 | 变更类型 | 说明 |
+|------|----------|------|
+| `domain/ThermalControlFSM.py` | 新增 | 温控 FSM 基类 |
+| `domain/FanFSM.py` | 重构 | 继承基类，从 198 行减至 20 行 |
+| `domain/PumpFSM.py` | 重构 | 继承基类，从 199 行减至 21 行 |
+| `domain/LightControllFSM.py` | 修复 | setBrightness(0) 完整关灯逻辑 |
+| `driver/lm75a.py` | 修复 | config() 任一参数即写寄存器 |
+| `driver/bsp.py` | 优化 | 死传感器驱动延迟导入 |
+| `domain/fileUtils.py` | 优化 | isFileExist 改用 uos.stat |
+| `domain/wifi.py` | 修复+清理 | scanAP 返回 list，删除未用函数 |
+| `main.py` | 优化 | readSensors 调度，reloadAllConfig 重试 |
+| `static/index.html` | 适配 | scanAP 返回格式变更 |
+| `static/index.html.gz` | 重新生成 | 8230→8215 字节 |
 

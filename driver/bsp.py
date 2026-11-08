@@ -5,11 +5,13 @@ from micropython import const
 import domain.sensorData as sensorData
 import neopixel
 import driver.lm75a as lm75a
-# 死传感器驱动（预留，当前不接入硬件，处理函数见 readSensors 后注释）
-import driver.bmp280 as bmp280
-import driver.hdc1080 as hdc1080
-import driver.bh1750 as bh1750
-import driver.pms5003 as pms5003
+# 死传感器驱动（预留，当前不接入硬件）：
+# 不在顶层导入，避免启动时占用 RAM 与导入时间。
+# 硬件接入后在对应 handler 内按需 import，并取消 readSensors 中读取逻辑的注释。
+# import driver.bmp280 as bmp280
+# import driver.hdc1080 as hdc1080
+# import driver.bh1750 as bh1750
+# import driver.pms5003 as pms5003
 from lib.rotary.rotary_irq_esp import RotaryIRQ
 
 # 传感器健康管理参数
