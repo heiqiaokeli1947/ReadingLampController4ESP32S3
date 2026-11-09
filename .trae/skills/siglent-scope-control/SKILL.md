@@ -73,7 +73,7 @@ C1:MEAS DUTY,ON      # enable duty cycle
 C1:PAVA? DUTY        # read  -> C1:PAVA DUTY,9.48E+01%
 ```
 
-Working params: `FREQ`, `DUTY`, `PER`, `PKPK`, `RISE`, `FALL`. Params `VPP`, `VMAX`, `VMIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `VRMS`, `VAVG` return empty via SCPI (use `PKPK` for peak-to-peak). See the Measurements section below for details.
+Working params: `FREQ`, `DUTY`, `PER`, `PKPK`, `RMS`, `MAX`, `MIN`, `RISE`, `FALL`. Params `VPP`, `VRMS`, `VMAX`, `VMIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `VAVG` return empty via SCPI (use `PKPK`/`RMS`/`MAX`/`MIN` instead). See the Measurements section below for details.
 
 Response values use scientific notation: `2.50E+04` = 25000, `9.48E+01` = 94.8. No signal returns `****` or empty.
 
@@ -164,12 +164,15 @@ ASET is the fastest way to get a stable display. After ASET, fine-tune VDIV and 
 ```
 C1:MEAS FREQ,ON       # enable measurement type on C1
 C1:PAVA? FREQ         # read -> C1:PAVA FREQ,2.50E+04Hz
-C1:PAVA? DUTY         # read -> C1:PAVA DUTY,9.40E+01%
+C1:PAVA? DUTY         # read -> C1:PAVA DUTY,9.48E+01%
 C1:PAVA? PER          # read -> C1:PAVA PER,4.00E-05s
 C1:MEAS PKPK,ON       # NOTE: peak-to-peak is PKPK, NOT VPP
-C1:PAVA? PKPK         # read -> C1:PAVA PKPK,1.41E+00V
+C1:PAVA? PKPK         # read -> C1:PAVA PKPK,1.40E+00V
+C1:PAVA? RMS          # read -> C1:PAVA RMS,1.24E+00V
+C1:PAVA? MAX          # read -> C1:PAVA MAX,1.26E+00V
+C1:PAVA? MIN          # read -> C1:PAVA MIN,-1.42E-01V
 C1:MEAS RISE,ON       # rise time
-C1:PAVA? RISE         # read -> C1:PAVA RISE,3.40E-09s
+C1:PAVA? RISE         # read -> C1:PAVA RISE,4.30E-09s
 C1:MEAS FALL,ON       # fall time
 C1:PAVA? FALL         # read -> C1:PAVA FALL,4.70E-09s
 ```
@@ -180,12 +183,15 @@ C1:PAVA? FALL         # read -> C1:PAVA FALL,4.70E-09s
 | `FREQ` | Frequency | 2.50E+04 Hz |
 | `DUTY` | Duty cycle | 9.48E+01 % |
 | `PER` | Period | 4.00E-05 s |
-| `PKPK` | Peak-to-peak voltage | 1.41E+00 V |
-| `RISE` | Rise time (10%-90%) | 3.40E-09 s |
+| `PKPK` | Peak-to-peak voltage | 1.40E+00 V |
+| `RMS` | RMS voltage | 1.24E+00 V |
+| `MAX` | Maximum voltage | 1.26E+00 V |
+| `MIN` | Minimum voltage | -1.42E-01 V |
+| `RISE` | Rise time (10%-90%) | 4.30E-09 s |
 | `FALL` | Fall time (90%-10%) | 4.70E-09 s |
 
-**Parameters that return EMPTY via SCPI** (but may show on screen):
-`VPP`, `VMAX`, `VMIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `OVER`, `PRES`, `VRMS`, `VAVG`. Use `PKPK` instead of `VPP`. The on-screen display shows VTOP/VBASE/AMP but they cannot be read via `PAVA?`.
+**Parameters that return EMPTY via SCPI** (use alternatives):
+`VPP`→use `PKPK`, `VRMS`→use `RMS`, `VMAX`→use `MAX`, `VMIN`→use `MIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `OVER`, `PRES`, `VAVG`, `AVG`. The on-screen display shows VTOP/VBASE/AMP/PW/NW but they cannot be read via `PAVA?`.
 
 **Notes:**
 - `PAVA?` requires the `?` before the parameter. `PAVA` (no `?`) returns empty.
@@ -390,13 +396,19 @@ C1:MEAS FREQ,ON
 C1:MEAS DUTY,ON
 C1:MEAS PKPK,ON
 C1:MEAS PER,ON
+C1:MEAS RMS,ON
+C1:MEAS MAX,ON
+C1:MEAS MIN,ON
 C1:MEAS RISE,ON
 C1:MEAS FALL,ON
 C1:PAVA? FREQ             # -> 2.50E+04 Hz
 C1:PAVA? DUTY             # -> 9.48E+01 %
 C1:PAVA? PER              # -> 4.00E-05 s
-C1:PAVA? PKPK             # -> 1.41E+00 V
-C1:PAVA? RISE             # -> 3.40E-09 s
+C1:PAVA? PKPK             # -> 1.40E+00 V
+C1:PAVA? RMS              # -> 1.24E+00 V
+C1:PAVA? MAX              # -> 1.26E+00 V
+C1:PAVA? MIN              # -> -1.42E-01 V
+C1:PAVA? RISE             # -> 4.30E-09 s
 C1:PAVA? FALL             # -> 4.70E-09 s
 ```
 
