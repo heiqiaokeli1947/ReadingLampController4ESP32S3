@@ -240,6 +240,28 @@ TRIG:WIND:TYPE ABS        # ABSolute | RELative window
 TRIG:WIND:LLEV 0.2        # window low (V)
 TRIG:WIND:HLEV 1.2        # window high (V)
 
+# Pattern trigger — fires on a logic combination across channels
+# (e.g. white PWM high AND yellow PWM low):
+TRIG:TYPE PATTERN
+TRIG:PATT:INP H,L,X,X     # per-channel state H|L|X(don't care), order C1..C4(,D0..D15)
+TRIG:PATT:LEV C1,0.7      # per-source level (query: TRIG:PATT:LEV? C1)
+TRIG:PATT:LIM GREAT       # optional time qualification: LESSthan|GREATerthan|INNer|OUTer
+TRIG:PATT:TLOW 1.0E-6
+TRIG:PATT:TUPP 4.0E-5
+
+# Delay trigger — fires when time from edge on source A to edge on source B
+# is out of range (measures inter-channel PWM phase shift):
+TRIG:TYPE DELAY
+TRIG:DEL:SOUR C1          # source A (reference edge)
+TRIG:DEL:SOUR2 C2         # source B (delayed edge)
+TRIG:DEL:SLOP RIS         # edge on A: RISing|FALLing
+TRIG:DEL:SLOP2 RIS        # edge on B
+TRIG:DEL:LEV C1,0.7       # level for source A
+TRIG:DEL:LEV2 C2,0.7      # level for source B
+TRIG:DEL:LIM INN          # LESSthan|GREATerthan|INNer|OUTer
+TRIG:DEL:TLOW 0
+TRIG:DEL:TUPP 2.0E-5
+
 # Edge trigger extras (holdoff stabilizes complex waveforms):
 TRIG:EDGE:HOLDoff TIMe    # holdoff mode: OFF|EVENts|TIMe
 TRIG:EDGE:HLDTime 1E-4    # holdoff time (s)
