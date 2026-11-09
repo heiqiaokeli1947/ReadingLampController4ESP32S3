@@ -328,6 +328,15 @@ ACQ:MODE?             # acquisition mode -> SAMple
 ACQ:POIN?             # acquisition memory depth -> 1.00E+05 (100kpts)
 ACQ:SRAT?             # sample rate -> 1.00E+09 (1 GSa/s)
 *STB?                 # status byte -> 4
+
+# Display extras (manual pp.188–199):
+DISP:AXIS ON          # axis labels ON|OFF; DISP:AXIS:MODE FIXed|TRACk
+DISP:BACK 100         # backlight brightness 0-100
+DISP:COL ON           # color grade ON|OFF (shows waveform density)
+DISP:INT 75,100       # intensity: waveform%,grid%
+DISP:GRIDS LIGH       # grid style: FULL|LIGHt|NONE
+DISP:TRAN 80          # menu transparency 0-100
+DISP:CLE              # clear display/persistence
 ```
 `TRIG:STAT?` is the quickest way to confirm the scope has a stable trigger before reading measurements.
 
@@ -437,6 +446,8 @@ SYST:REB                # :SYSTem:REBoot — restart the oscilloscope (use to re
 SYST:SHUT               # :SYSTem:SHUTdown — shut down the OS
 SYST:PON?               # Power-On-Line state (auto-reboot on power restore)
 SYST:TOUC ON|OFF        # enable/disable touch screen
+SYST:SELFC              # start self-calibration (DISCONNECT ALL PROBES first; takes several minutes)
+SYST:SELFC?             # query -> DOING|DONE
 ```
 
 If the SCPI server hangs, `SYST:REB` cannot be delivered (server is the hung component) — physical power cycle is required. But for a responsive scope, `SYST:REB` is the clean way to apply license/config changes.
