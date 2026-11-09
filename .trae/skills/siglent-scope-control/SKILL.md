@@ -280,10 +280,56 @@ CURS:IXD?                 # 1/(X2-X1) -> 2.500E+04 (25 kHz) — great for quick 
 CURS OFF                  # disable cursors
 ```
 
+## Measurement Statistics
+```
+MEAS:ADV:STAT ON          # enable measurement statistics
+MEAS:ADV:STAT?            # query -> ON
+C1:PAVA? FREQ,MAX         # max value -> C1:PAVA FREQ,2.50E+04Hz
+C1:PAVA? FREQ,MIN         # min value
+C1:PAVA? FREQ,AVG         # average value
+C1:PAVA? FREQ,DEV         # standard deviation
+MEAS:ADV:STAT:RES         # reset statistics
+```
+Suffix `,MAX|,MIN|,AVG|,DEV` to any `PAVA?` query to get statistics. Only works after `MEAS:ADV:STAT ON`.
+
+## Search
+Count and navigate edges/pulses in the acquired waveform.
+```
+SEAR ON                   # enable search
+SEAR:EDGE:SOUR C1         # search source
+SEAR:EDGE:SLOP POS        # search slope
+SEAR:EDGE:LEV 0.7         # search level
+SEAR:COUN?                # number of found events -> 4
+SEAR:EVEN?                # current event index -> 3
+SEAR:EVEN 1               # go to event 1
+SEAR:NAV NEXT             # next event
+SEAR:NAV PREV             # previous event
+SEAR OFF                  # disable search
+```
+
+## Horizontal Position
+```
+HOR:POS?                  # trigger horizontal position (%) -> 50.00 (center)
+HOR:POS 30                # set to 30%
+```
+
 ## Save / Recall Setup
 ```
 *SAV 1                    # save current setup to slot 1 (slots 1-10)
 RCL 1                     # recall setup from slot 1
+SAVE:WAV C1               # save C1 waveform data to file (on scope storage)
+SAVE:IMAG                 # save screen image
+SAVE:SET                  # save current setup to file
+```
+
+## Decode (Serial Protocol)
+The scope can decode serial protocols (I2C, SPI, UART, CAN, etc.).
+```
+DEC1 ON                   # enable decode bus 1
+DEC1:BUS UART             # bus type: UART|SPI|IIC|CAN|LIN|...
+DEC1:BUS?                 # query bus type
+DEC1:SOUR C1              # decode source channel
+DEC1 OFF                  # disable decode
 ```
 
 ## DVM (Digital Voltmeter)
