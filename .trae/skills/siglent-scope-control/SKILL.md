@@ -262,6 +262,19 @@ TRIG:DEL:LIM INN          # LESSthan|GREATerthan|INNer|OUTer
 TRIG:DEL:TLOW 0
 TRIG:DEL:TUPP 2.0E-5
 
+# Qualified trigger — edge on source E counts only while qualifying source Q
+# meets a state/edge condition (e.g. capture white PWM edges only while pump is on):
+TRIG:TYPE QUALIFIED
+TRIG:QUAL:ES C1           # edge source
+TRIG:QUAL:ESL RIS         # edge slope: RISing|FALLing
+TRIG:QUAL:ELEV 0.7        # edge level (V)
+TRIG:QUAL:QS C3           # qualifying source
+TRIG:QUAL:QLEV 0.7        # qualifying level (V)
+TRIG:QUAL:TYPE STATE,HIGH # STATe|STATE_DLY (+LOW|HIGH) or EDGE|EDGE_DLY (+RISing|FALLing)
+TRIG:QUAL:LIM INN         # delay limits for *_DLY types
+TRIG:QUAL:TLOW 3.0E-9
+TRIG:QUAL:TUPP 3.0E-8
+
 # Edge trigger extras (holdoff stabilizes complex waveforms):
 TRIG:EDGE:HOLDoff TIMe    # holdoff mode: OFF|EVENts|TIMe
 TRIG:EDGE:HLDTime 1E-4    # holdoff time (s)
