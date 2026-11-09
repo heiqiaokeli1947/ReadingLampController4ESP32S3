@@ -188,7 +188,7 @@ Response: {"success":true}\r\n{"retCount":1}\r\n{"cmdrslt":"<scpi response>","fr
 
 PowerShell gotcha: set `[System.Net.ServicePointManager]::Expect100Continue = $false` first, or the embedded web server rejects the request with `417 Expectation Failed`. The proxy routes to the same instrument app as port 5024, so it is equally affected by app-level hangs.
 
-Discovered web UI endpoints (after password login to `/login.php`): `/welcome.php`, `/lan.php`, `/lan_setting.php`, `/SCPI_control.php` (web SCPI console), `/wifi.php`, `/Instrument/novnc/vnc_auto.php`. No remote reboot endpoint exists.
+Discovered web UI endpoints (after password login to `/login.php`): `/welcome.php`, `/lan.php`, `/lan_setting.php`, `/SCPI_control.php` (web SCPI console), `/wifi.php`, `/Instrument/novnc/vnc_auto.php`. No remote reboot endpoint exists on the web server; use SCPI `SYST:REB` to reboot when the SCPI server is alive.
 
 ### Auto Setup
 ```
@@ -249,22 +249,52 @@ All query responses are prefixed with a `0x00` null byte before the actual data.
 
 ## Waveform Data Acquisition
 
-The scope can return raw waveform samples via SCPI for programmatic analysis. Uses IEEE 488.2 binary block format.
+The scope can return raw waveform samples via SCPI for programmatic analysis. Uses IEEE 488.2 binary block format. (Protocol from Programming Guide p663-678; conversion constants for SDS2000X HD confirmed in Table 1 p675.)
 
 ```
-WAV:SOUR C1           # set waveform source channel
+WAV:SOUR C1           # set waveform source channel (C1-C4, F1-F2 math, D0-D15 digital)
 WAV:SOUR?             # query -> C1
-WAV:PRE?              # waveform descriptor (WAVEDESC) - binary block with calibration data
-WAV:DATA?             # raw sample data - binary block, e.g. #6100000<100000 bytes>
+WAV:WIDT WORD         # REQUIRED on SDS2000X HD (12-bit ADC); WORD = 16-bit/sample, upper byte first
+WAV:STAR 0            # start point (NR1)
+WAV:INT 1             # interval between transferred points (decimation)
+WAV:POIN 20000        # number of points to transfer (0 = all)
+WAV:MAXP?             # max points per transfer piece -> e.g. 10000000
+WAV:PRE?              # waveform descriptor (WAVEDESC) - binary block "#9<9digits>" + 346 bytes
+WAV:DATA?             # raw sample data - binary block "#N<Ndigits>" + data + trailing 0x0A 0x0A
 ```
 
-- `WAV:DATA?` returns `#<n><length><data>` where `<n>` is the digit count of `<length>`. 8-bit samples (0–255, 128 = center). Note: response has a leading `0x00` byte before `#`.
-- `WAV:PRE?` returns the LeCroy-compatible WAVEDESC descriptor (also leading `0x00`). Key fields:
-  - Offset 156 (float): vertical gain in V/count ≈ `VDIV × 25 / 256`
-  - Offset 160 (float): vertical offset in V
-  - Offset 176 (float): horizontal interval in s/sample
-- Voltage conversion: `V = (sample - 128) * vertical_gain + vertical_offset`
-- Data is large (~100 KB). Save to a file; do not print to console.
+**SDS2000X HD conversion constants** (Programming Guide Table 1, p675):
+- `code_per_div = 480`, Center Code = `2047`, Full Code = `4096` (12-bit, left-aligned when WORD)
+- For WORD transfers: reconstruct `data_16bit = byte[2i+1]*256 + byte[2i]` (LSB order in practice per guide example), then `code = data_16bit >> (16 - 12)`
+- If `code > 2047`: `code = code - 4096` (convert to signed)
+
+**Voltage / time conversion** (p674-675):
+- `voltage(V) = code * (vdiv / code_per_div) - voffset`
+  - `vdiv` = float at WAVEDESC offset 156 (vertical scale WITHOUT probe attenuation)
+  - `voffset` = float at offset 160 (vertical offset without probe attenuation)
+  - `code_per_div` = float at offset 164 (should read 480 on this model)
+- `time(S) = -delay - (timebase * grid/2) + index * interval`
+  - `timebase` = enum short at offset 324 (see enum table p672), `delay` = double at offset 180 (trigger offset, s)
+  - `grid = 10` for SDS2000X HD, `interval` = float at offset 176 (sample interval = 1/sampling rate)
+
+**WAVEDESC layout** (starts right after `#9<9-digits>` header; response has leading `0x00`):
+| Offset | Type | Field |
+|--------|------|-------|
+| 0-15 | char[16] | "WAVEDESC" |
+| 60-63 | long | WAVE_ARRAY_1: byte count of data array |
+| 116-119 | long | wave_array_count: number of data points |
+| 156-159 | float | vertical gain (vdiv, no probe atten) |
+| 160-163 | float | vertical offset (no probe atten) |
+| 164-167 | float | code_per_div (480) |
+| 172-173 | short | ADC bits (12) |
+| 176-179 | float | horizontal interval (s) |
+| 180-187 | double | horizontal offset / trigger delay (s) |
+| 324-325 | short | timebase enum |
+| 326-327 | short | coupling: 0=DC,1=AC,2=GND |
+| 328-331 | float | probe attenuation |
+| 334-335 | short | bandwidth limit: 0=OFF,1=20M,2=200M |
+
+- Data is large (~100 KB+). Save to a file; do not print to console. Read raw bytes, not ReadLine().
 
 ## Display / Status / Acquire
 ```
@@ -363,6 +393,76 @@ SAVE:WAV C1               # save C1 waveform data to file (on scope storage)
 SAVE:IMAG                 # save screen image
 SAVE:SET                  # save current setup to file
 ```
+
+## Screenshot via SCPI (Preferred Over Browser Automation)
+
+`PRIN?` captures the scope screen and returns image bytes directly over the SCPI socket (Programming Guide p22, p755). This replaces the fragile browser ScreenShot + Save-As dialog workflow.
+
+```
+PRIN? BMP               # screen dump as BMP (returns raw image bytes)
+PRIN? PNG               # screen dump as PNG
+```
+
+- Response is raw binary image data (read raw bytes until stream end; expect a leading `0x00` byte — strip it before writing to file).
+- Python/VISA example from the manual (p755): set `chunk_size = 20*1024*1024`, `write("PRIN? BMP")`, `read_raw()`, write bytes to file.
+- Also `:SAVE:IMAGe "<path>",<BMP|JPG|PNG>,<OFF|ON>` saves a screenshot to scope storage (`local/...`, `U-disk0/...`, or `net_storage/...`; invert flag ON = white background for printing).
+- `:SAVE:MATLab "<path>",C1` saves channel waveform data as .mat to scope storage.
+
+## System Power Commands
+
+```
+SYST:REB                # :SYSTem:REBoot — restart the oscilloscope (use to recover a wedged app)
+SYST:SHUT               # :SYSTem:SHUTdown — shut down the OS
+SYST:PON?               # Power-On-Line state (auto-reboot on power restore)
+SYST:TOUC ON|OFF        # enable/disable touch screen
+```
+
+If the SCPI server hangs, `SYST:REB` cannot be delivered (server is the hung component) — physical power cycle is required. But for a responsive scope, `SYST:REB` is the clean way to apply license/config changes.
+
+## Timebase Window (Zoom)
+
+```
+TIM:SCAL 1.00E-05       # main timebase (same as TDIV; NR3 format)
+TIM:DEL 1.00E-05        # main delay: time between trigger and delay reference point
+TIM:REF DELay           # expansion strategy: DELay (fixed delay) | POSition (fixed grid pos)
+TIM:REF:POS 20          # horizontal reference center 0-100% (when REF=DELay)
+TIM:WIND ON             # enable zoomed window
+TIM:WIND:SCAL 1.00E-06  # zoom window scale (must be <= main scale, auto-clamped)
+TIM:WIND:DEL 1.00E-03   # zoom window delay (auto-clamped to keep window in main sweep)
+```
+
+## Built-in Waveform Generator (WGEN)
+
+The scope has a built-in function generator (1 channel, front-panel output). Syntax follows the Siglent SDG series. Useful for self-test signals without the ESP32 DUT (requires FG license — verify `C1:OUTP?` responds; an unlicensed unit rejects WGEN commands).
+
+```
+C1:OUTP ON                    # enable generator output (query -> C1:OUTP ON,LOAD,HZ,PLRT,NOR)
+C1:OUTP LOAD,50               # set load: 50 (ohm) | HZ (high-Z)
+C1:BSWV WVTP,PULSE            # wave type: SINE|SQUARE|RAMP|PULSE|NOISE|ARB|DC|PRBS|IQ
+C1:BSWV FRQ,25000             # frequency in Hz (not for NOISE/DC)
+C1:BSWV DUTY,50               # duty cycle % (SQUARE/PULSE only)
+C1:BSWV AMP,3                 # amplitude in Vpp
+C1:BSWV OFST,1.5              # offset in V
+C1:BSWV WIDTH,2E-5            # positive pulse width in s (PULSE only)
+C1:BSWV SYM,50                # ramp symmetry % (RAMP only)
+C1:BSWV?                      # query all params -> C1:BSWV WVTP,SINE,FRQ,100HZ,PERI,0.01S,AMP,2V,OFST,0V,...
+C1:SYNC ON                    # enable sync output
+C1:ARWV INDEX,0               # arbitrary wave by index (use STL? to list)
+STL? BUILDIN                  # list stored arbitrary waveforms (index,name pairs)
+VOLTPRT ON                    # over-voltage protection
+```
+
+Self-test example — generate a 25 kHz, 3 Vpp, 50% PULSE and measure it on C1 (loop the WGEN output into CH1):
+```
+C1:BSWV WVTP,PULSE
+C1:BSWV FRQ,25000
+C1:BSWV DUTY,50
+C1:BSWV AMP,3
+C1:BSWV OFST,1.5
+C1:OUTP ON
+```
+Note: WGEN amplitude/offset accuracy depends on load setting (50 vs HZ) — set `LOAD,HZ` when probing with a 10X probe into the 1MΩ scope input.
+
 
 ## Decode (Serial Protocol)
 The scope can decode serial protocols (UART, SPI, I2C, CAN, LIN, etc.).
@@ -478,6 +578,8 @@ CURS OFF
 CH3 (pump) and CH4 (fan) often show 25 kHz crosstalk from the LED PWM traces even when fan/pump are off. To confirm crosstalk: turn the light off (`GET .../light?devicepwd=pengping&mode=set&onOffStatus=0`), wait 3 s, re-measure. If the signal disappears, it is crosstalk, not real PWM output.
 
 ## Web VNC Screenshot
+
+**Prefer `PRIN? PNG` over any browser workflow** — see "Screenshot via SCPI" above. The noVNC/browser methods below are fallbacks for when the SCPI channel is unavailable but the web UI is alive.
 
 To capture a screenshot of the live scope display, use the noVNC web interface.
 
