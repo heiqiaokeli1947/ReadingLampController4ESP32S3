@@ -537,6 +537,35 @@ SAVE:REF "local/ref1",C1                 # save channel as reference waveform
 ```
 Extension must match the format chosen (not auto-detected). If path type omitted, external saves default to `U-disk0`.
 
+## Mask Test (MTESt, Pass/Fail)
+Builds a tolerance mask around the current waveform and counts frames that violate it (manual pp.296–308).
+```
+MTES:SOUR C1              # test source channel
+MTES:MASK:CRE 0.8,0.08    # create mask with X,Y margins in div, range [0.08, 4.00]
+MTES ON                   # enable mask test
+MTES:OPER ON              # start the test run
+MTES:COUN?                # results -> FAIL,<n>,PASS,<n>,TOTAL,<n>
+MTES:RES                  # reset counters
+MTES:FUNC:BUZZ ON         # buzzer on fail
+MTES:FUNC:COF ON          # Capture-on-Fail: save failing frame screenshots to SIGLENT/ dir
+MTES:FUNC:FTH ON          # Failure-to-History: failing frames go to history memory
+MTES:OPER OFF             # stop test
+MTES OFF                  # disable
+```
+Useful for long-run PWM stability soak: leave mask test running on a 25 kHz PWM channel, then read `MTES:COUN?`.
+
+## Acquisition Modes (ACQuire)
+```
+ACQ:MODE YT               # display mode: YT | XY (Lissajous) | ROLL (strip chart for slow signals)
+ACQ:AMOD FAST             # capture rate: FAST (high wfms/s, catches anomalies) | SLOW
+ACQ:MDEPth 12.5M          # memory depth (model-dependent; also 125M etc.)
+ACQ:POIN 1E5              # acquisition points
+ACQ:MMAN FMDepth          # memory management: FMDepth (fixed) | AMDepth (auto)
+ACQ:INT ON                # interpolation ON|OFF
+ACQ:NUMA?                 # acquisitions since last setting change -> 350
+ACQ:CSW                   # clear sweep
+```
+
 ## System / Error
 ```
 *OPC?                 # operation complete -> 1
