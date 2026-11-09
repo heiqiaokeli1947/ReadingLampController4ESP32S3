@@ -189,6 +189,19 @@ TRIG:PULS:LIM LESS        # LESSthan|GREATerthan|INNer (between)|OUTer
 TRIG:PULS:TLOW 1.0E-6     # lower time bound (s)
 TRIG:PULS:TUPP 4.0E-5     # upper time bound (s, used with INNer/OUTer)
 
+# Slope trigger — fires when rise/fall time between two levels is out of range
+# (catches slow PWM edges from degraded MOSFET drive):
+TRIG:TYPE SLOPE
+TRIG:SLOP:SOUR C1         # source (analog channels only)
+TRIG:SLOP:SLOP RIS        # RISing|FALLing|ALTernate
+TRIG:SLOP:LLEV 0.3        # low level (V)
+TRIG:SLOP:HLEV 0.9        # high level (V, must be > LLEV)
+TRIG:SLOP:LIM LESS        # LESSthan|GREATerthan|INNer|OUTer (time limits)
+TRIG:SLOP:TLOW 2.0E-9     # lower time bound (s; N/A when LIM=LESSthan)
+TRIG:SLOP:TUPP 3.0E-8     # upper time bound (s; N/A when LIM=GREATerthan)
+TRIG:SLOP:COUP DC         # DC|AC|LFREJect|HFREJect
+TRIG:SLOP:HOLD OFF        # holdoff: OFF|EVENts|TIME (+ HLDTime/HLDEVent/HSTart)
+
 # Edge trigger extras (holdoff stabilizes complex waveforms):
 TRIG:EDGE:HOLDoff TIMe    # holdoff mode: OFF|EVENts|TIMe
 TRIG:EDGE:HLDTime 1E-4    # holdoff time (s)
