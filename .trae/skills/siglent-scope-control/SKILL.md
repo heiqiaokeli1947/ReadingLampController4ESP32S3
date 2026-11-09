@@ -465,35 +465,77 @@ Note: WGEN amplitude/offset accuracy depends on load setting (50 vs HZ) — set 
 
 
 ## Decode (Serial Protocol)
-The scope can decode serial protocols (UART, SPI, I2C, CAN, LIN, etc.).
+Two decode buses (BUS1/BUS2). Protocol syntax per Programming Guide pp.70–120 (manual-exact, field-verified where noted).
 ```
-DEC:BUS1 ON                # enable decode bus 1
-DEC:BUS1:TYPE UART         # bus type: UART|SPI|IIC|CAN|LIN|...
-DEC:BUS1 OFF               # disable decode
+DEC ON                      # enable decode function (query: DEC?)
+DEC:BUS1 ON                 # enable decode bus 1
+DEC:BUS1:PROT UART          # protocol: IIC|SPI|UART|CAN|LIN (+FLEXray|CANFd|IIS|M1553 options)
+DEC:BUS1:FORM HEX           # display format: HEX|DEC|BIN|ASCII
+DEC:BUS1:RES?               # read decoded frames -> header row + comma-separated values, frames separated by ';'
+DEC:LIST D1                 # show decode list on digital/list display
+DEC:BUS1 OFF                # disable decode bus
 ```
 
 **UART decode:**
 ```
-DEC:BUS1:UART:BAUD 115200bps    # baud rate (600..115200bps or CUSTom,<value>)
-DEC:BUS1:UART:BAUD?             # query -> 115200bps
+DEC:BUS1:UART:BAUD 115200bps    # baud: 600|1200|2400|4800|9600|19200|38400|57600|115200bps or CUSTom,<300-20000000>
 DEC:BUS1:UART:DLEN 8            # data bits (5-9)
-DEC:BUS1:UART:DLEN?             # query -> 8
 DEC:BUS1:UART:PAR NONE          # parity: NONE|ODD|EVEN
-DEC:BUS1:UART:PAR?              # query -> NONE
 DEC:BUS1:UART:STOP 1            # stop bits (1|1.5|2)
-DEC:BUS1:UART:STOP?             # query -> 1
-DEC:BUS1:UART:RXSOUR C1         # RX source channel
-DEC:BUS1:UART:TXSOUR C2         # TX source channel
+DEC:BUS1:UART:RXSOUR C1         # RX source: C1-C4 | D0-D15 | DIS
+DEC:BUS1:UART:TXSOUR C2         # TX source
+DEC:BUS1:UART:RXT 1.65          # RX threshold level (V)
+DEC:BUS1:UART:IDLE LOW          # idle level: LOW|HIGH
+DEC:BUS1:UART:BITO LSBF         # bit order: LSBF|MSBF
 ```
-Note: `DEC:BUS1:TYPE?` and `RXSOUR?` may return empty even though set commands work.
+
+**I2C decode:**
+```
+DEC:BUS1:IIC:SCLS C1            # SCL source
+DEC:BUS1:IIC:SDAS C2            # SDA source
+DEC:BUS1:IIC:SCLT 1.65          # SCL threshold (V)
+DEC:BUS1:IIC:SDAT 1.65          # SDA threshold (V)
+DEC:BUS1:IIC:RWBit ADDR         # R/W bit position: ADDR|DATA
+```
+
+**Serial triggers** (Programming Guide pp.399+, 561+): `:TRIGger:IIC`, `:TRIGger:SPI`, `:TRIGger:UART`, `:TRIGger:CAN`, `:TRIGger:LIN` subsystems — e.g. `TRIG:IIC:COND ADDR` + `TRIG:IIC:ADDR <addr>` triggers on a specific I2C address. Useful to trigger on ESP32 boot UART output or I2C transactions.
+
+Note: `DEC:BUS1:PROT?`/`RXSOUR?` may return empty even though set commands work (observed on this firmware). `DEC:BUS1:RES?` is the reliable way to pull decoded data.
 
 ## DVM (Digital Voltmeter)
 ```
-DVM?                      # DVM state -> OFF
-DVM ON                    # enable DVM
-DVM:MODE?                 # mode -> DCavg (also DC, AC, AC+DC)
-DVM:SOUR?                 # source -> C1
+DVM ON                    # enable DVM (query: DVM?)
+DVM:MODE DCavg            # mode: DCavg|DCRMs|ACRMs|PKPK|AMPLitude (manual p206)
+DVM:SOUR C1               # source channel
+DVM:CURR?                 # read current DVM value -> 0.98E+00 (NR3)
+DVM:ARAN ON               # auto range ON|OFF
+DVM:ALAR ON               # overload alarm ON|OFF
+DVM:HOLD ON               # hold displayed value ON|OFF
 ```
+
+## History Mode (Segmented Memory)
+Records N frames in sequence; review them after capture (manual pp.249–256).
+```
+HISTOR ON                 # enable history/record mode
+HISTOR?                   # query -> ON
+HISTOR:FRAM 100           # max frames to record (more points/frame = fewer frames)
+HISTOR:FRAM?              # query current frame count setting
+HISTOR:INTER 1.00E-03     # playback interval per frame, [1E-06, 1] seconds
+HISTOR:LIST?              # list captured frames with timestamps
+HISTOR:PLAY               # start playback
+HISTOR:TIME?              # timestamp of current frame
+```
+Typical flow: set trigger → `HISTOR ON` → let it record → `TRIG:STOP` → `HISTOR:FRAM <n>` to step to a frame → `PRIN? PNG` or measurements on that frame.
+
+## Save Waveform Data to Scope Storage
+```
+SAVE:BIN "U-disk0/Siglent/c1.bin",C1     # binary waveform, path prefix: local/ | U-disk0/ | net_storage/
+SAVE:CSV "U-disk0/c1.csv",C1             # CSV export
+SAVE:MATL "local/c1.mat",C1              # MATLAB .mat
+SAVE:SET "local/setup1.set"              # instrument setup
+SAVE:REF "local/ref1",C1                 # save channel as reference waveform
+```
+Extension must match the format chosen (not auto-detected). If path type omitted, external saves default to `U-disk0`.
 
 ## System / Error
 ```
