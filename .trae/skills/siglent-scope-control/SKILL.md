@@ -395,6 +395,28 @@ MEAS:ADV:STAT:RES         # reset statistics
 ```
 Suffix `,MAX|,MIN|,AVG|,DEV` to any `PAVA?` query to get statistics. Only works after `MEAS:ADV:STAT ON`.
 
+## Measurement Gate (MEASure:GATE)
+Restrict automatic measurements to a time window between gates A and B (manual pp.275–277). Useful to measure a single PWM pulse inside a long capture.
+```
+MEAS:GATE ON              # enable measurement gate (query: MEAS:GATE? -> ON)
+MEAS:GATE:GA -1.00E-07    # gate A position in seconds (range: ±grid/2 × timebase)
+MEAS:GATE:GB 1.00E-07     # gate B position in seconds
+```
+Note: GA cannot exceed GB — out-of-order values are auto-clamped to the other gate.
+
+## Reference Waveforms (REF)
+Save a channel snapshot as a reference overlay for visual comparison (manual pp.316–321). Four slots: REFA–REFD.
+```
+REFA:DATA SAVE,C1         # save C1 waveform into REFA
+REFA:DATA LOAD            # show REFA on screen (UNLoad hides it)
+REFA:DATA:SOUR?           # query stored source -> C1
+REFA:DATA:SCAL 1.00E-01   # vertical scale of the displayed reference
+REFA:DATA:POS 2.00E-01    # vertical offset of the displayed reference
+REFA:LAB ON               # show label on screen
+REFA:LAB:TEXT "REFA"      # set label text (max 20 chars)
+```
+Typical flow: capture a known-good 25 kHz PWM → `REFA:DATA SAVE,C1` → later `REFA:DATA LOAD` and compare a suspect signal against the golden reference. Cursor sources accept REFA–REFD (`CURS:SOUR1 REFA`).
+
 ## Search
 Count and navigate edges/pulses in the acquired waveform.
 ```
