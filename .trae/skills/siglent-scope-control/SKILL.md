@@ -175,7 +175,20 @@ C1:PAVA? FREQ         # measurements remain readable on frozen waveform
 
 **STOP state gotcha (IMPORTANT):** `TRIG:STOP` sets `TRIG:MODE?` to `STOP`. From there, `TRIG:RUN` alone may NOT resume acquisition on this firmware — recovery requires explicitly setting `TRIG:MODE AUTO` again. If the scope gets stuck in `Stop`, send `TRIG:MODE AUTO` then wait ~1s and check `TRIG:STAT?` for `Trig'd`.
 
-**SCPI server hang warning:** Do NOT send `ASET` and immediately close the TCP connection — the scope's SCPI server (port 5024) can hang while ASET is processing, refusing new connections (web UI on port 80 stays alive). Wait for ASET to complete (~3-5s, poll `*OPC?`) before disconnecting. If hung, wait several minutes or power-cycle the scope.
+**SCPI server hang warning:** Do NOT send `ASET` and immediately close the TCP connection — the scope's SCPI server (port 5024) can hang while ASET is processing, refusing new connections (web UI on port 80 stays alive). Wait for ASET to complete (~3-5s, poll `*OPC?`) before disconnecting. If hung, wait several minutes or power-cycle the scope. Note: when the instrument app wedges, BOTH raw 5024 and the HTTP proxy backend report "Device can not be connected" — only a power cycle (or long watchdog timeout) recovers.
+
+## Alternative Channel: HTTP SCPI Proxy
+The scope's web server exposes an **unauthenticated** HTTP SCPI proxy — useful as a backup channel or for simple scripts without raw sockets:
+
+```
+POST http://192.168.30.105/device_read_write.php
+Body: cmd={"cmd":"*idn?","type":"ds","to":"127.0.0.1"}&action=excutescpicmds
+Response: {"success":true}\r\n{"retCount":1}\r\n{"cmdrslt":"<scpi response>","from":"127.0.0.1"}
+```
+
+PowerShell gotcha: set `[System.Net.ServicePointManager]::Expect100Continue = $false` first, or the embedded web server rejects the request with `417 Expectation Failed`. The proxy routes to the same instrument app as port 5024, so it is equally affected by app-level hangs.
+
+Discovered web UI endpoints (after password login to `/login.php`): `/welcome.php`, `/lan.php`, `/lan_setting.php`, `/SCPI_control.php` (web SCPI console), `/wifi.php`, `/Instrument/novnc/vnc_auto.php`. No remote reboot endpoint exists.
 
 ### Auto Setup
 ```
