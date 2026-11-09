@@ -70,12 +70,12 @@ Enable a measurement before reading it. Use one channel per connection to avoid 
 C1:MEAS FREQ,ON      # enable frequency measurement on C1
 C1:PAVA? FREQ        # read  -> C1:PAVA FREQ,2.50E+04Hz
 C1:MEAS DUTY,ON      # enable duty cycle
-C1:PAVA? DUTY        # read  -> C1:PAVA DUTY,4.96E+01%
+C1:PAVA? DUTY        # read  -> C1:PAVA DUTY,9.48E+01%
 ```
 
-Supported params: `FREQ`, `DUTY`, `VPP`, `AMP`, `VTOP`, `VBASE`. Amplitude params may return empty when measurement slots are full — reduce enabled measurements if so.
+Working params: `FREQ`, `DUTY`, `PER`, `PKPK`, `RISE`, `FALL`. Params `VPP`, `VMAX`, `VMIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `VRMS`, `VAVG` return empty via SCPI (use `PKPK` for peak-to-peak). See the Measurements section below for details.
 
-Response values use scientific notation: `2.50E+04` = 25000, `4.96E+01` = 49.6. No signal returns `****` or empty.
+Response values use scientific notation: `2.50E+04` = 25000, `9.48E+01` = 94.8. No signal returns `****` or empty.
 
 ## Scope Configuration Commands
 
@@ -90,8 +90,40 @@ C1:OFST 0             # set vertical offset to 0 V (CRITICAL: non-zero offset pu
 C1:OFST?              # query -> C1:OFST 0.00E+00V
 C1:COUP DC            # set coupling DC (also AC, GND)
 C1:CPL?               # query -> C1:CPL D1M (DC, 1MOhm)
+C1:BWL FULL           # bandwidth limit: FULL | 20M | 200M
+C1:BWL?               # query -> C1:BWL ON (or FULL)
+C1:INVT OFF           # invert waveform: ON | OFF
+C1:INVT?              # query -> C1:INVT OFF
+C1:UNIT V             # vertical unit: V | A | W
+C1:UNIT?              # query -> C1:UNIT V
 ```
 **Note**: coupling query is `CPL?` (not `COUP?` or `COUPLING?`).
+
+### Probe Attenuation
+**IMPORTANT**: Probe commands require the full `:CHANn:` prefix — the `Cn:` short form does NOT work.
+```
+:CHAN1:PROB VAL,1.00E+01   # set probe attenuation to 10X (use NR3 format)
+:CHAN1:PROB?               # query -> 1.00E+01 (10X)
+:CHAN1:PROB DEF            # reset to default 1X
+```
+- Probe setting affects displayed VDIV: setting probe from 10X to 1X changes VDIV display from 1V to 0.1V (physical ADC range unchanged).
+- For accurate voltage readings, the probe setting MUST match the physical probe attenuation (standard Siglent probes are 10X).
+- `C1:PROB?` returns empty — always use `:CHAN1:PROB?`.
+
+### Channel Visible (Display On/Off)
+Like probe, requires full `:CHANn:` form:
+```
+:CHAN1:VIS ON            # show channel 1
+:CHAN1:VIS?              # query -> ON
+:CHAN2:VIS OFF           # hide channel 2
+```
+
+### Vertical Reference Strategy
+```
+CHAN:REF OFFS            # offset stays fixed when VDIV changes (waveform expands around X-axis)
+CHAN:REF POS             # offset stays fixed to grid position when VDIV changes
+CHAN:REF?                # query -> OFFSet or POSition
+```
 
 ### Timebase
 ```
@@ -104,13 +136,23 @@ HOR:POS?              # horizontal position (%) -> 50.00 (trigger point at cente
 ```
 TRIG:EDGE:SOUR CHAN1  # trigger source (CHAN1..CHAN4)
 TRIG:EDGE:SOUR?       # query -> C1
-TRIG:EDGE:LEV 1.65    # trigger level in volts (note: scope may clamp/quantize; verify with ?)
+TRIG:EDGE:LEV 1.65    # trigger level in volts
 TRIG:EDGE:LEV?        # query -> 1.10E+00
 TRIG:EDGE:SLOP POS    # slope: POS or NEG
 TRIG:EDGE:SLOP?       # query -> RISing
 TRIG:MODE AUTO        # trigger mode: AUTO, NORM, SINGLE
 TRIG:MODE?            # query -> AUTO
 ```
+
+**Trigger Level Clamping (IMPORTANT):** The firmware clamps the trigger level to approximately **1.1 × VDIV** from center, NOT the 4.1 × VDIV stated in the programming manual. Always verify with `TRIG:EDGE:LEV?` after setting.
+
+| VDIV | Max trigger level |
+|------|-------------------|
+| 0.5V | ~0.55V |
+| 1.0V | ~1.10V |
+| 2.0V | ~2.20V |
+
+For a 3.3V logic signal with VDIV=1V, set trigger to ~0.7V (midpoint of typical 0–1.4V swing after probe attenuation). If you need a higher trigger level, increase VDIV first.
 
 ### Auto Setup
 ```
@@ -126,21 +168,42 @@ C1:PAVA? DUTY         # read -> C1:PAVA DUTY,9.40E+01%
 C1:PAVA? PER          # read -> C1:PAVA PER,4.00E-05s
 C1:MEAS PKPK,ON       # NOTE: peak-to-peak is PKPK, NOT VPP
 C1:PAVA? PKPK         # read -> C1:PAVA PKPK,1.41E+00V
-C1:PAVA? RMS          # read -> C1:PAVA RMS,1.22E+00V
-C1:PAVA? MAX          # read -> C1:PAVA MAX,1.26E+00V
-C1:PAVA? MIN          # read -> C1:PAVA MIN,-1.46E-01V
+C1:MEAS RISE,ON       # rise time
+C1:PAVA? RISE         # read -> C1:PAVA RISE,3.40E-09s
+C1:MEAS FALL,ON       # fall time
+C1:PAVA? FALL         # read -> C1:PAVA FALL,4.70E-09s
 ```
+
+**Working measurement parameters (confirmed on SDS2204X HD):**
+| Param | Description | Example |
+|-------|-------------|---------|
+| `FREQ` | Frequency | 2.50E+04 Hz |
+| `DUTY` | Duty cycle | 9.48E+01 % |
+| `PER` | Period | 4.00E-05 s |
+| `PKPK` | Peak-to-peak voltage | 1.41E+00 V |
+| `RISE` | Rise time (10%-90%) | 3.40E-09 s |
+| `FALL` | Fall time (90%-10%) | 4.70E-09 s |
+
+**Parameters that return EMPTY via SCPI** (but may show on screen):
+`VPP`, `VMAX`, `VMIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `OVER`, `PRES`, `VRMS`, `VAVG`. Use `PKPK` instead of `VPP`. The on-screen display shows VTOP/VBASE/AMP but they cannot be read via `PAVA?`.
+
 **Notes:**
 - `PAVA?` requires the `?` before the parameter. `PAVA` (no `?`) returns empty.
 - Peak-to-peak parameter is `PKPK`, not `VPP`.
-- `VTOP`, `VBASE`, `AMP`, `VMAX`, `VMIN`, `VAVG`, `PW`, `NW` return empty even after `MEAS ...,ON` — cause unknown (possibly measurement slot limits or unsupported via SCPI on this firmware).
 - `MEAS?` returns global measurement state (`ON`/`OFF`).
 
 ## Invalid / Misleading Commands
 
 - `C1:TURN?`, `C1:SWIT?`, `C1:DISP?` — not valid queries, return empty (but `C1:TURN ON` works for setting)
 - `C1:OUTP?` — returns output impedance (`C1:OUTP OFF,LOAD,HZ,PLRT,NOR`), NOT channel display state
-- `TRIG:EDGE:LEV` — accepted but value may be clamped/quantized; always verify with `TRIG:EDGE:LEV?`
+- `TRIG:EDGE:LEV` — accepted but value clamped to ~1.1×VDIV; always verify with `TRIG:EDGE:LEV?`
+- `C1:PROB?`, `C1:VIS?` — short form returns empty; must use full `:CHAN1:PROB?` / `:CHAN1:VIS?`
+- `C1:IMP?` — impedance query returns empty (SDS2204X HD is 1MΩ only, no 50Ω option)
+- `DISP:PERS ON` — accepted but `DISP:PERS?` still returns OFF (persistence may not be controllable via SCPI)
+
+## SCPI Response Format Note
+
+All query responses are prefixed with a `0x00` null byte before the actual data. When using `StreamReader.ReadLine()`, this null byte appears as a leading character. Strip it with `$resp.TrimStart([char]0)`. Some responses (like `WAV:DATA?`) use binary block format with the same leading null byte.
 
 ## Waveform Data Acquisition
 
@@ -163,13 +226,73 @@ WAV:DATA?             # raw sample data - binary block, e.g. #6100000<100000 byt
 
 ## Display / Status / Acquire
 ```
-DISP:GRID?            # grid mode -> FULL
+DISP:GRID?            # grid mode -> FULL (also HALF, OFF)
+DISP:GRID FULL        # set grid mode
 DISP:PERS?            # persistence -> OFF
 TRIG:STAT?            # trigger status -> Trig'd (or Auto, Ready, Roll, etc.)
+ACQ:MODE?             # acquisition mode -> SAMple
 ACQ:POIN?             # acquisition memory depth -> 1.00E+05 (100kpts)
+ACQ:SRAT?             # sample rate -> 1.00E+09 (1 GSa/s)
 *STB?                 # status byte -> 4
 ```
 `TRIG:STAT?` is the quickest way to confirm the scope has a stable trigger before reading measurements.
+
+## Math Operations (FUNCtion)
+The scope supports math operations on waveforms. Up to 2 math functions (FUNC1, FUNC2).
+
+```
+FUNC1 ON                  # enable math function 1
+FUNC1:OPER ADD            # set operation: ADD|SUBTract|MULTiply|DIVision|FFT|INTegrate|DIFF|SQRT|ERES|AVERage|ABSolute|SIGN|IDENtity|NEGation|EXP|TEN|LN|LOG|INTErpolate|MAXHold|MINHold|FILTer
+FUNC1:OPER?               # query -> ADD
+FUNC1:SOUR1 C1            # source 1 (C1-C4, F1-F2)
+FUNC1:SOUR2 C2            # source 2 (for ADD/SUBT/MULT/DIV)
+FUNC1:SOUR1?              # query -> C1
+FUNC1:SCAL 1              # math vertical scale (V/div)
+FUNC1:OFST 0              # math vertical offset
+FUNC1 OFF                 # disable math
+```
+
+**FFT example:**
+```
+FUNC1 ON
+FUNC1:OPER FFT
+FUNC1:SOUR1 C1
+FUNC1:FFT:AUT NORM        # autoset: SPAN|PEAK|NORMal
+FUNC1:FFT:HCEN?           # center frequency -> 0.00E+00
+FUNC1:FFT:HSC?            # horizontal scale -> 5.00E+07 (50 MHz/div)
+FUNC1:FFT:SPAN?           # span -> 5.00E+08 (500 MHz)
+```
+
+## Cursor Measurements
+```
+CURS ON                   # enable cursors
+CURS?                     # query -> ON
+CURS:MODE MAN,X           # mode: TRACk | MANual[,X|Y|XY] | MEASure
+CURS:MODE?                # query -> MANual,X
+CURS:SOURce1 C1           # cursor source 1
+CURS:SOURce2 C1           # cursor source 2
+CURS:X1 0                 # X1 position in seconds
+CURS:X2 4.00E-05          # X2 position in seconds
+CURS:X1?                  # query -> 0.00E+00
+CURS:X2?                  # query -> 4.00E-05
+CURS:XDEL?                # X2-X1 -> 4.00E-05 (40 us)
+CURS:IXD?                 # 1/(X2-X1) -> 2.500E+04 (25 kHz) — great for quick frequency check
+CURS OFF                  # disable cursors
+```
+
+## Save / Recall Setup
+```
+*SAV 1                    # save current setup to slot 1 (slots 1-10)
+RCL 1                     # recall setup from slot 1
+```
+
+## DVM (Digital Voltmeter)
+```
+DVM?                      # DVM state -> OFF
+DVM ON                    # enable DVM
+DVM:MODE?                 # mode -> DCavg (also DC, AC, AC+DC)
+DVM:SOUR?                 # source -> C1
+```
 
 ## System / Error
 ```
@@ -189,14 +312,18 @@ SYST:ERR?             # last error, e.g. -113,"Undefined header;..."
 
 ## Complete 25 kHz PWM Measurement Workflow
 
-End-to-end sequence to configure the scope for a 25 kHz, ~3 Vpp PWM signal and read measurements:
+End-to-end sequence to configure the scope for a 25 kHz PWM signal and read measurements:
 
 ```
+# 0. Set probe attenuation (MUST match physical probe, standard = 10X)
+:CHAN1:PROB VAL,1.00E+01
+:CHAN2:PROB VAL,1.00E+01
+
 # 1. Reset channel offsets (critical — leftover offsets push signals off-screen)
 C1:OFST 0
 C2:OFST 0
 
-# 2. Set vertical scale (~1 V/div fits 3.3 V logic with margin)
+# 2. Set vertical scale (1 V/div fits typical 1.4V swing with margin)
 C1:VDIV 1
 C2:VDIV 1
 
@@ -207,18 +334,37 @@ TDIV 1E-5
 TRIG:EDGE:SOUR CHAN1
 TRIG:EDGE:SLOP POS
 TRIG:MODE AUTO
-TRIG:EDGE:LEV 1.65        # midpoint of 3.3 V; verify with TRIG:EDGE:LEV?
+TRIG:EDGE:LEV 0.7         # ~0.7V midpoint; max is ~1.1V at VDIV=1V (clamped!)
 
-# 5. Enable and read measurements
+# 5. Confirm stable trigger
+TRIG:STAT?                # -> Trig'd
+
+# 6. Enable and read measurements
 C1:MEAS FREQ,ON
 C1:MEAS DUTY,ON
-C1:MEAS VPP,ON
+C1:MEAS PKPK,ON
+C1:MEAS PER,ON
+C1:MEAS RISE,ON
+C1:MEAS FALL,ON
 C1:PAVA? FREQ             # -> 2.50E+04 Hz
-C1:PAVA? DUTY             # -> duty in %
-C1:PAVA? PER              # -> period in seconds
+C1:PAVA? DUTY             # -> 9.48E+01 %
+C1:PAVA? PER              # -> 4.00E-05 s
+C1:PAVA? PKPK             # -> 1.41E+00 V
+C1:PAVA? RISE             # -> 3.40E-09 s
+C1:PAVA? FALL             # -> 4.70E-09 s
 ```
 
 For fastest stable display, send `ASET` first, then override VDIV/TDIV to desired values.
+
+**Quick cursor frequency check:**
+```
+CURS ON
+CURS:MODE MAN,X
+CURS:X1 0
+CURS:X2 4.00E-05
+CURS:IXD?                # -> 2.500E+04 (25 kHz)
+CURS OFF
+```
 
 ## Crosstalk Check (CH3/CH4)
 
