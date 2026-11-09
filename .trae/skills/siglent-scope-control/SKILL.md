@@ -175,6 +175,28 @@ C1:PAVA? FREQ         # measurements remain readable on frozen waveform
 
 **STOP state gotcha (IMPORTANT):** `TRIG:STOP` sets `TRIG:MODE?` to `STOP`. From there, `TRIG:RUN` alone may NOT resume acquisition on this firmware — recovery requires explicitly setting `TRIG:MODE AUTO` again. If the scope gets stuck in `Stop`, send `TRIG:MODE AUTO` then wait ~1s and check `TRIG:STAT?` for `Trig'd`.
 
+### Advanced Trigger Types (manual pp.402–460)
+Switch trigger type first, then set type-specific parameters.
+```
+TRIG:TYPE PULSE           # EDGE|PULSE|SLOPe|INTerval|PATTern|RUNT|WINDow|DROPout|VIDeo|QUALified|NTHEdge|DELay|SETuphold|IIC|SPI|UART|LIN|CAN...
+TRIG:TYPE?                # query -> EDGE
+
+# Pulse-width (glitch) trigger — catch anomalous PWM pulses:
+TRIG:PULS:SOUR C1         # source
+TRIG:PULS:POL POS         # polarity: POSitive|NEGative
+TRIG:PULS:LEV 1.65        # level
+TRIG:PULS:LIM LESS        # LESSthan|GREATerthan|INNer (between)|OUTer
+TRIG:PULS:TLOW 1.0E-6     # lower time bound (s)
+TRIG:PULS:TUPP 4.0E-5     # upper time bound (s, used with INNer/OUTer)
+
+# Edge trigger extras (holdoff stabilizes complex waveforms):
+TRIG:EDGE:HOLDoff TIMe    # holdoff mode: OFF|EVENts|TIMe
+TRIG:EDGE:HLDTime 1E-4    # holdoff time (s)
+TRIG:EDGE:HLDEVent 3      # holdoff by event count
+TRIG:EDGE:NREJ ON         # noise rejection (increases hysteresis)
+TRIG:EDGE:COUP DC         # trigger coupling: DC|AC|LFRejet|HFRejet
+```
+
 **SCPI server hang warning:** Do NOT send `ASET` and immediately close the TCP connection — the scope's SCPI server (port 5024) can hang while ASET is processing, refusing new connections (web UI on port 80 stays alive). Wait for ASET to complete (~3-5s, poll `*OPC?`) before disconnecting. If hung, wait several minutes or power-cycle the scope. Note: when the instrument app wedges, BOTH raw 5024 and the HTTP proxy backend report "Device can not be connected" — only a power cycle (or long watchdog timeout) recovers.
 
 ## Alternative Channel: HTTP SCPI Proxy
