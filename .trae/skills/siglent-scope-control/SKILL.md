@@ -142,6 +142,9 @@ TRIG:EDGE:SLOP POS    # slope: POS or NEG
 TRIG:EDGE:SLOP?       # query -> RISing
 TRIG:MODE AUTO        # trigger mode: AUTO, NORM, SINGLE
 TRIG:MODE?            # query -> AUTO
+TRIG:FREQ?            # hardware frequency counter of trigger source (Hz), read-only
+TRIG:EDGE:IMP FIFT    # EXT trigger source impedance: ONEMeg|FIFTy (EXT/EXT5 sources only)
+FORM:DATA CUSTom,7    # set query response precision: SINGle(7)|DOUBle(14)|CUSTom,1-64 digits
 ```
 
 **Trigger Level Clamping (IMPORTANT):** The firmware clamps the trigger level to approximately **1.1 × VDIV** from center, NOT the 4.1 × VDIV stated in the programming manual. Always verify with `TRIG:EDGE:LEV?` after setting.
@@ -281,6 +284,25 @@ TRIG:EDGE:HLDTime 1E-4    # holdoff time (s)
 TRIG:EDGE:HLDEVent 3      # holdoff by event count
 TRIG:EDGE:NREJ ON         # noise rejection (increases hysteresis)
 TRIG:EDGE:COUP DC         # trigger coupling: DC|AC|LFRejet|HFRejet
+
+# Nth-edge trigger — fires on the Nth edge after an idle time (manual pp.538–548).
+# Useful to skip a burst preamble and trigger deep inside a PWM train:
+TRIG:TYPE NTHEdge
+TRIG:NEDG:SOUR C1         # source
+TRIG:NEDG:SLOP RIS        # RISing|FALLing
+TRIG:NEDG:IDLE 1.00E-4    # idle time before edge counting starts (range 8ns–20s)
+TRIG:NEDG:EDGE 100        # fire on this edge number [1, 65535]
+
+# Setup/Hold trigger — fires on setup or hold time violation of data vs clock
+# (manual pp.549–558). Needs two channels:
+TRIG:TYPE SETuphold
+TRIG:SHOL:TYPE SET        # SETup|HOLD violation
+TRIG:SHOL:CS C1           # clock source; TRIG:SHOL:CTHR 1.50E+00 = clock threshold
+TRIG:SHOL:SLOP RIS        # clock edge
+TRIG:SHOL:DS C2           # data source; TRIG:SHOL:DTHR 1.50E+00 = data threshold
+TRIG:SHOL:LEV HIGH        # data level to check: LOW|HIGH
+TRIG:SHOL:LIM LESS        # LESSthan|GREATerthan|INNer|OUTer
+TRIG:SHOL:TUPP 3.00E-08   # time bound [2ns, 20s] (TLOW also available)
 ```
 
 **SCPI server hang warning:** Do NOT send `ASET` and immediately close the TCP connection — the scope's SCPI server (port 5024) can hang while ASET is processing, refusing new connections (web UI on port 80 stays alive). Wait for ASET to complete (~3-5s, poll `*OPC?`) before disconnecting. If hung, wait several minutes or power-cycle the scope. Note: when the instrument app wedges, BOTH raw 5024 and the HTTP proxy backend report "Device can not be connected" — only a power cycle (or long watchdog timeout) recovers.
@@ -416,7 +438,7 @@ ACQ:SRAT?             # sample rate -> 1.00E+09 (1 GSa/s)
 *STB?                 # status byte -> 4
 
 # Display extras (manual pp.188–199):
-DISP:AXIS ON          # axis labels ON|OFF; DISP:AXIS:MODE FIXed|TRACk
+DISP:AXIS ON          # axis labels ON|OFF; DISP:AXIS:MODE FIXed|MOVing
 DISP:BACK 100         # backlight brightness 0-100
 DISP:COL ON           # color grade ON|OFF (shows waveform density)
 DISP:INT 75,100       # intensity: waveform%,grid%
@@ -450,6 +472,24 @@ FUNC1:FFT:AUT NORM        # autoset: SPAN|PEAK|NORMal
 FUNC1:FFT:HCEN?           # center frequency -> 0.00E+00
 FUNC1:FFT:HSC?            # horizontal scale -> 5.00E+07 (50 MHz/div)
 FUNC1:FFT:SPAN?           # span -> 5.00E+08 (500 MHz)
+FUNC1:FFT:MODE AVERage,16 # acquisition: NORMal|MAXHold|AVERage[,4-1024]
+FUNC1:FFT:UNIT DBVrms     # vertical unit: DBVrms|Vrms|DBm
+FUNC1:FFT:WIND FLATtop    # window: RECTangle|BLACkman|HANNing|HAMMing|FLATtop (FLATtop = best amplitude accuracy)
+FUNC1:FFT:SEAR:THR -40    # peak-search threshold (unit follows FFT:UNIT)
+FUNC1:FFT:SEAR:EXC 20     # peak-search excursion (dB above neighbors)
+FUNC1:FFT:SEAR:RES?       # peak list -> Peaks,1,2.50E+04,1.20E+00;2,... (no,freq,ampl)
+```
+
+**Other math operation extras** (manual pp.215–246):
+```
+# Digital filter operation (FUNCn:OPER FILTer) — e.g. low-pass a noisy PWM:
+FUNC1:FILT:TYP LPAS       # LPASs|HPASs|BPASs|BREJect
+FUNC1:FILT:HFR 1.00E+06   # upper freq (BPASs/BREJect)
+FUNC1:FILT:LFR 1.00E+03   # lower freq
+# ERES resolution enhancement (0.5–3.0 bits), MAXHold/MINHold envelope sweeps:
+FUNC1:ERES:BITS 2.0       # for FUNCn:OPER ERES
+FUNC1:MAXH:SW 100         # maxhold sweep limit [1, 2^31-2]
+FUNC1:MINH:SW 100         # minhold sweep limit
 ```
 
 ## Cursor Measurements
@@ -502,6 +542,19 @@ REFA:LAB ON               # show label on screen
 REFA:LAB:TEXT "REFA"      # set label text (max 20 chars)
 ```
 Typical flow: capture a known-good 25 kHz PWM → `REFA:DATA SAVE,C1` → later `REFA:DATA LOAD` and compare a suspect signal against the golden reference. Cursor sources accept REFA–REFD (`CURS:SOUR1 REFA`).
+
+## Memory Waveforms (MEMory, M1–M4)
+Memory waveforms are independent saved traces (manual pp.285–294). Unlike REF overlays, each M has its own horizontal/vertical scale and position, so a fast zoom of one pulse can be displayed alongside the live waveform.
+```
+MEM1:IMP C1               # import source into M1: C<x>|Z<x>|F<x>|M<x>|"<path>.bin"
+MEM1:SWIT ON              # display M1 (query: MEM1:SWIT? -> ON)
+MEM1:HOR:SCAL 1.00E-07    # horizontal scale 100 ns/div (independent of live TDIV)
+MEM1:HOR:POS 1.00E-05     # horizontal position vs trigger point
+MEM1:HOR:SYNC ON          # sync M1 horizontal params to the imported source
+MEM1:VERT:SCAL 1.00E-01   # vertical scale
+MEM1:VERT:POS 1.00E-01    # vertical position
+MEM1:LAB ON               # show label; MEM1:LAB:TEXT "PWM_ref" (max 20 chars)
+```
 
 ## Search
 Count and navigate edges/pulses in the acquired waveform.
