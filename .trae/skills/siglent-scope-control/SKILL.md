@@ -357,7 +357,7 @@ C1:PAVA? FALL         # read -> C1:PAVA FALL,4.70E-09s
 | `FALL` | Fall time (90%-10%) | 4.70E-09 s |
 
 **Parameters that return EMPTY via SCPI** (use alternatives):
-`VPP`→use `PKPK`, `VRMS`→use `RMS`, `VMAX`→use `MAX`, `VMIN`→use `MIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `OVER`, `PRES`, `VAVG`, `AVG`. The on-screen display shows VTOP/VBASE/AMP/PW/NW but they cannot be read via `PAVA?`.
+`VPP`→use `PKPK`, `VRMS`→use `RMS`, `VMAX`→use `MAX`, `VMIN`→use `MIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `OVER`, `PRES`, `VAVG`, `AVG`. The on-screen display shows VTOP/VBASE/AMP/PW/NW but they cannot be read via `PAVA?`. Candidate workaround (unverified): read them through the advanced measurement system (`MEAS:ADV:P<n>:TYPE` + `MEAS:ADV:P<n>:VALue?`) or the simple-mode path (`MEAS:SIMP:ITEM` + `MEAS:SIMP:VALue?`) — see "Advanced Measurement" section.
 
 **Notes:**
 - `PAVA?` requires the `?` before the parameter. `PAVA` (no `?`) returns empty.
@@ -520,6 +520,56 @@ C1:PAVA? FREQ,DEV         # standard deviation
 MEAS:ADV:STAT:RES         # reset statistics
 ```
 Suffix `,MAX|,MIN|,AVG|,DEV` to any `PAVA?` query to get statistics. Only works after `MEAS:ADV:STAT ON`.
+
+## Advanced Measurement (MEASure:ADVanced)
+
+The advanced measurement system (manual pp.256–285) supports up to 12 simultaneous measurement items (P1–P12), each with its own source(s), statistics, and a direct value query. **Candidate workaround for params that return empty via `PAVA?`** (TOP/BASE/AMPL/PWID/NWID etc.) — NOT yet live-verified on this unit.
+
+```
+MEAS:MODE ADV             # measurement mode: SIMPle | ADVanced
+MEAS:ADV:LIN 12           # total displayed items, range [1,12]
+MEAS:ADV:P1 ON            # enable item P1
+MEAS:ADV:P1:TYPE TOP      # measurement type (full param list below)
+MEAS:ADV:P1:SOUR1 C1      # source 1: C<x>|Z<x>|F<x>|D<m>|REFA-REFD
+MEAS:ADV:P1:SOUR2 C2      # source 2 (two-source params only; delay accepts C<x> only)
+MEAS:ADV:P1:VAL?          # read value -> 3.30E+00 (NR3)
+MEAS:ADV:STAT ON          # enable statistics (PAVA? ,MAX/,MIN suffix also needs this)
+MEAS:ADV:P1:STAT? CURR    # statistics: ALL|CURRent|MEAN|MAXimum|MINimum|STDev|COUNt
+MEAS:ADV:STAT:MAXC 1024   # max statistics count [0,1024], 0 = unlimited
+MEAS:ADV:STAT:HISTOG ON   # per-measurement histogram (M1 style only)
+MEAS:ADV:STAT:RES         # reset statistics
+MEAS:ADV:STYL M1          # display style: M1 (vertical + histogram) | M2 (horizontal, no histogram)
+```
+
+Full TYPE list: `PKPK|MAX|MIN|AMPL|TOP|BASE|LEVELX|CMEAN|MEAN|STDEV|VSTD|RMS|CRMS|MEDIAN|CMEDIAN|OVSN|FPRE|OVSP|RPRE|PER|FREQ|TMAX|TMIN|PWID|NWID|DUTY|NDUTY|WID|NBWID|DELAY|TIMEL|RISE|FALL|RISE10T90|FALL90T10|CCJ|PAREA|NAREA|AREA|ABSAREA|CYCLES|REDGES|FEDGES|EDGES|PPULSES|NPULSES|PHA|SKEW|FRR|FRF|FFR|FFF|LRR|LRF|LFR|LFF|PACArea|NACArea|ACArea|ABSACArea|PSLOPE|NSLOPE|TSR|TSF|THR|THF`.
+
+Two-source params (require SOURce1 + SOURce2): `PHA` (phase difference), `SKEW` (time of A edge minus nearest B edge), `FRR/FRF/FFR/FFF` (first-edge pairs), `LRR/LRF/LFR/LFF` (first→last edge pairs), `DELAY`. These enable PWM phase-shift measurement between channels (e.g. white vs yellow LED PWM).
+
+### Simple-Mode Alternative Read (MEASure:SIMPle)
+
+The simple measurement system has its own SCPI read path — a second candidate workaround for empty `PAVA?` params:
+
+```
+MEAS:SIMP:SOUR C1         # simple measurement source
+MEAS:SIMP:ITEM TOP,ON     # add TOP to the simple measurement window
+MEAS:SIMP:VAL? TOP        # read value -> 3.30E+00
+MEAS:SIMP:VAL? ALL        # read all simple measurement values at once (except delay types)
+```
+
+Simple-mode param names match `PAVA?` except rise/fall time: simple uses `RISE20T80`/`FALL80T20`, advanced uses `RISE10T90`/`FALL90T10`.
+
+### Measurement Thresholds (MEASure:THReshold)
+
+Thresholds define the reference levels used by timing/duty measurements (manual pp.281–285):
+
+```
+MEAS:THR:SOUR C1              # threshold source: C<x>|Z<x>|F<x>|REFA-REFD
+MEAS:THR:TYPE PERC            # PERCent | ABSolute
+MEAS:THR:PERC 80,45,10        # high,mid,low in percent (default 90,50,10)
+MEAS:THR:ABS 3.00,1.00,-1.50  # high,mid,low in volts (when TYPE=ABSolute)
+```
+
+Use ABSolute thresholds when measuring PWM between fixed logic levels so PER/PWID/DUTY do not drift with amplitude changes.
 
 ## Measurement Gate (MEASure:GATE)
 Restrict automatic measurements to a time window between gates A and B (manual pp.275–277). Useful to measure a single PWM pulse inside a long capture.
