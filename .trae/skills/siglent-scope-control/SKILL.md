@@ -329,14 +329,27 @@ SAVE:SET                  # save current setup to file
 ```
 
 ## Decode (Serial Protocol)
-The scope can decode serial protocols (I2C, SPI, UART, CAN, etc.).
+The scope can decode serial protocols (UART, SPI, I2C, CAN, LIN, etc.).
 ```
-DEC1 ON                   # enable decode bus 1
-DEC1:BUS UART             # bus type: UART|SPI|IIC|CAN|LIN|...
-DEC1:BUS?                 # query bus type
-DEC1:SOUR C1              # decode source channel
-DEC1 OFF                  # disable decode
+DEC:BUS1 ON                # enable decode bus 1
+DEC:BUS1:TYPE UART         # bus type: UART|SPI|IIC|CAN|LIN|...
+DEC:BUS1 OFF               # disable decode
 ```
+
+**UART decode:**
+```
+DEC:BUS1:UART:BAUD 115200bps    # baud rate (600..115200bps or CUSTom,<value>)
+DEC:BUS1:UART:BAUD?             # query -> 115200bps
+DEC:BUS1:UART:DLEN 8            # data bits (5-9)
+DEC:BUS1:UART:DLEN?             # query -> 8
+DEC:BUS1:UART:PAR NONE          # parity: NONE|ODD|EVEN
+DEC:BUS1:UART:PAR?              # query -> NONE
+DEC:BUS1:UART:STOP 1            # stop bits (1|1.5|2)
+DEC:BUS1:UART:STOP?             # query -> 1
+DEC:BUS1:UART:RXSOUR C1         # RX source channel
+DEC:BUS1:UART:TXSOUR C2         # TX source channel
+```
+Note: `DEC:BUS1:TYPE?` and `RXSOUR?` may return empty even though set commands work.
 
 ## DVM (Digital Voltmeter)
 ```
