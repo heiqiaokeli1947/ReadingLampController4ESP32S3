@@ -202,6 +202,44 @@ TRIG:SLOP:TUPP 3.0E-8     # upper time bound (s; N/A when LIM=GREATerthan)
 TRIG:SLOP:COUP DC         # DC|AC|LFREJect|HFREJect
 TRIG:SLOP:HOLD OFF        # holdoff: OFF|EVENts|TIME (+ HLDTime/HLDEVent/HSTart)
 
+# Interval trigger — fires when time between consecutive edges is out of range
+# (catches PWM frequency jitter / missing pulses):
+TRIG:TYPE INTERVAL
+TRIG:INT:SOUR C1          # source
+TRIG:INT:SLOP RIS         # edge pair: RISing|FALLing
+TRIG:INT:LEV 0.7          # level
+TRIG:INT:LIM GREAT        # LESSthan|GREATerthan|INNer|OUTer
+TRIG:INT:TLOW 3.9E-5      # lower time bound (s)
+TRIG:INT:TUPP 4.1E-5      # upper time bound (s)
+TRIG:INT:COUP DC
+
+# Dropout trigger — fires when no edge occurs within a timeout
+# (catches a stalled PWM output / firmware hang):
+TRIG:TYPE DROPOUT
+TRIG:DROP:SOUR C1
+TRIG:DROP:SLOP RIS        # edge watched
+TRIG:DROP:LEV 0.7
+TRIG:DROP:TYPE EDGE       # EDGE (edge timeout) | STATe (state timeout)
+TRIG:DROP:TIME 1.0E-4     # timeout, SDS2000X HD range [2E-9, 20] s
+
+# Runt trigger — fires on pulses that cross one level but not the other
+# (catches marginal PWM high levels):
+TRIG:TYPE RUNT
+TRIG:RUNT:SOUR C1
+TRIG:RUNT:POL POS         # POSitive|NEGative runt polarity
+TRIG:RUNT:LLEV 0.3        # low level (V)
+TRIG:RUNT:HLEV 0.9        # high level (V)
+TRIG:RUNT:LIM GREAT       # LESSthan|GREATerthan|INNer|OUTer (pulse-width limits)
+TRIG:RUNT:TLOW 2.0E-9
+TRIG:RUNT:TUPP 2.0E+1
+
+# Window trigger — fires when signal enters or leaves a voltage window:
+TRIG:TYPE WINDOW
+TRIG:WIND:SOUR C1
+TRIG:WIND:TYPE ABS        # ABSolute | RELative window
+TRIG:WIND:LLEV 0.2        # window low (V)
+TRIG:WIND:HLEV 1.2        # window high (V)
+
 # Edge trigger extras (holdoff stabilizes complex waveforms):
 TRIG:EDGE:HOLDoff TIMe    # holdoff mode: OFF|EVENts|TIMe
 TRIG:EDGE:HLDTime 1E-4    # holdoff time (s)
