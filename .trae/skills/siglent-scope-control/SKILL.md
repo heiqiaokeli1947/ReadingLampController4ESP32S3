@@ -154,6 +154,29 @@ TRIG:MODE?            # query -> AUTO
 
 For a 3.3V logic signal with VDIV=1V, set trigger to ~0.7V (midpoint of typical 0–1.4V swing after probe attenuation). If you need a higher trigger level, increase VDIV first.
 
+### Single Trigger & Run Control
+Trigger states (`TRIG:STAT?`): `Arm | Ready | Auto | Trig'd | Stop | Roll`.
+
+```
+TRIG:MODE SINGLE      # single-shot mode
+TRIG:RUN              # arm the single trigger (equivalent to pressing SINGLE/RUN)
+TRIG:STAT?            # Arm/Ready while waiting -> Stop after capture
+TRIG:STOP             # halt acquisition and freeze waveform (sets MODE to STOP)
+TRIG:RUN              # resume from STOP
+```
+
+**Verified single-shot flow** (continuous 25kHz PWM):
+```
+TRIG:MODE SINGLE
+TRIG:RUN              # arm
+# poll TRIG:STAT? until "Stop" (fires in <300ms with continuous signal)
+C1:PAVA? FREQ         # measurements remain readable on frozen waveform
+```
+
+**STOP state gotcha (IMPORTANT):** `TRIG:STOP` sets `TRIG:MODE?` to `STOP`. From there, `TRIG:RUN` alone may NOT resume acquisition on this firmware — recovery requires explicitly setting `TRIG:MODE AUTO` again. If the scope gets stuck in `Stop`, send `TRIG:MODE AUTO` then wait ~1s and check `TRIG:STAT?` for `Trig'd`.
+
+**SCPI server hang warning:** Do NOT send `ASET` and immediately close the TCP connection — the scope's SCPI server (port 5024) can hang while ASET is processing, refusing new connections (web UI on port 80 stays alive). Wait for ASET to complete (~3-5s, poll `*OPC?`) before disconnecting. If hung, wait several minutes or power-cycle the scope.
+
 ### Auto Setup
 ```
 ASET                  # auto-configure timebase, voltage scale, and trigger for the active signal
