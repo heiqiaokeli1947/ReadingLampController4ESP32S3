@@ -1565,6 +1565,7 @@ Post-recovery validation order (each step must pass before the next):
 python scripts\scope_lab.py idn       # *IDN?, TRIG:STAT?, ACQ:SRAT?
 python scripts\scope_lab.py single    # CH1 config -> SINGLE -> RUN -> poll Stop -> PRIN? PNG
 # Read $env:TEMP\scope_lab\single.png and confirm a 25 kHz PWM square wave is on screen
+python scripts\scope_lab.py pwm       # DUT /status vs measured FREQ/DUTY on C1..C4 + pwm.png
 python scripts\scope_lab.py runall    # ordered suite, appends to scope_lab\runall.log
 ```
 

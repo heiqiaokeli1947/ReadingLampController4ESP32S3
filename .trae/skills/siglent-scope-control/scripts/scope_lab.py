@@ -109,6 +109,41 @@ def exp_wgen(sc):
           sc.cmd("WGEN:BSWV OFST,1.65"), sc.cmd("WGEN:BSWV DUTY,50"))
     print("WGEN? ->", sc.cmd("WGEN:BSWV?"))
 
+def exp_pwm(sc):
+    """DUT status vs measured PWM: the project's core verification."""
+    import json, urllib.request
+    dut = os.environ.get("DUT_IP", "192.168.30.74")
+    pwd = os.environ.get("DUT_PWD", "pengping")
+    st = {}
+    try:
+        with urllib.request.urlopen(f"http://{dut}/status?devicepwd={pwd}&mode=get", timeout=8) as r:
+            st = json.loads(r.read().decode())
+    except Exception as e:
+        print("DUT status FAIL:", type(e).__name__, e)
+    print(f"DUT {dut}: onOff={st.get('onOffStatus')} brightness={st.get('brightness')} "
+          f"colorTemp={st.get('colorTemperature')} whiteApplied={st.get('whiteApplied')} "
+          f"yellowApplied={st.get('yellowApplied')} fanSpeed={st.get('fanSpeed')} "
+          f"pumpSpeed={st.get('pumpSpeed')}")
+    print("PWM config:", {k: st.get(k) for k in
+                          ("whitePwmFreq", "yellowPwmFreq", "pumpPwmFreq", "fanPwmFreq",
+                           "whitePwmMin", "whitePwmMax", "yellowPwmMin", "yellowPwmMax",
+                           "pumpPwmMin", "pumpPwmMax", "fanPwmMin", "fanPwmMax")})
+    chans = [(1, "white", "whiteApplied"), (2, "yellow", "yellowApplied"),
+             (3, "pump", "pumpSpeed"), (4, "fan", "fanSpeed")]
+    sc.cmd("C1:VDIV 0.5"); sc.cmd("C1:OFST 0"); sc.cmd("TDIV 1E-5")
+    print(f"{'CH':<3}{'signal':<8}{'duty bound':<14}{'applied':<10}{'FREQ':<22}{'DUTY'}")
+    for ch, name, key in chans:
+        c = f"C{ch}"
+        sc.cmd(f"{c}:TURN ON"); sc.cmd(f":CHAN{ch}:VIS ON")
+        sc.cmd(f"{c}:VDIV 0.5"); sc.cmd(f"{c}:OFST 0")
+        sc.cmd(f"{c}:MEAS FREQ,ON"); sc.cmd(f"{c}:MEAS DUTY,ON")
+        freq = sc.cmd(f"{c}:PAVA? FREQ").split(",")[-1]
+        duty = sc.cmd(f"{c}:PAVA? DUTY").split(",")[-1]
+        lo, hi = st.get(f"{name}PwmMin"), st.get(f"{name}PwmMax")
+        print(f"{c:<3}{name:<8}{str(lo)+'~'+str(hi)+'%':<14}{st.get(key, '?'):<10}{freq:<22}{duty}")
+    sc.screenshot(os.path.join(OUT, "pwm.png"))
+    print("expected: duty ≈ min + (max-min) × applied/100 (white/yellow; fan/pump only when running)")
+
 def exp_meas(sc):
     """MEAS:ADV vs MEAS:SIMP comparison."""
     print("MODE ADV:", sc.cmd("MEAS:MODE ADV"))
@@ -301,10 +336,10 @@ if __name__ == "__main__":
     sc = Scope()
     try:
         fn = {"idn": exp_idn, "single": exp_single, "wgen": exp_wgen,
-              "meas": exp_meas, "history": exp_histplay, "acquire": exp_acquire,
-              "ref": exp_ref, "display": exp_display, "cursor": exp_cursor,
-              "dvm": exp_dvm, "mask": exp_mask, "fft": exp_fft,
-              "save": exp_save, "runall": exp_runall}.get(name)
+              "pwm": exp_pwm, "meas": exp_meas, "history": exp_histplay,
+              "acquire": exp_acquire, "ref": exp_ref, "display": exp_display,
+              "cursor": exp_cursor, "dvm": exp_dvm, "mask": exp_mask,
+              "fft": exp_fft, "save": exp_save, "runall": exp_runall}.get(name)
         if name == "trig":
             exp_trig(sc, sys.argv[2] if len(sys.argv) > 2 else "PULSE")
         elif fn:
