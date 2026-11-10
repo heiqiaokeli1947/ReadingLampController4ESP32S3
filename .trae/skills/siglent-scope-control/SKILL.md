@@ -57,15 +57,53 @@ Rules that follow:
 | every reply starts with a NUL | firmware prefixes 0x00 | strip leading `\x00` before parsing |
 | `SYST:ERR?`, `*STB?`, `SEAR:NAV` work but are not in the manual | firmware/standard-SCPI extensions | do not rely on them for portability |
 
-## Device Info
+## Device Info & discovery (nothing is hardcoded)
 
-- Scope IP: `192.168.30.105`, web password `12345678`
-- DUT IP: `192.168.30.74`, API password `pengping`
-- Probe map: CH1=GPIO16(white LED), CH2=GPIO17(yellow LED), CH3=GPIO18(pump), CH4=GPIO8(fan)
+**Scope address — discover it, never assume it.** The unit is LXI-compliant, so resolve it at runtime:
+
+```powershell
+python scripts\scope_discover.py                              # mDNS _lxi._tcp.local + SSDP
+python scripts\scope_discover.py --subnet 192.168.30.0/24     # TCP-5024 sweep fallback
+python scripts\scope_discover.py --json                       # machine-readable list
+```
+
+Every script resolves the target in this order: `--host` → `SCOPE_IP` → LXI discovery. If discovery
+returns more than one instrument the scripts stop and list the candidates — **ask the user which one**,
+do not guess. mDNS still answers while the instrument app is wedged, so discovery can locate a scope
+whose SCPI port is closed.
+
+**DUT endpoint and credentials — ask the user or pass them in.** Never keep them in this file.
+
+| Parameter | CLI | Environment | If missing |
+|---|---|---|---|
+| Scope IP | `--host 10.0.0.5` | `SCOPE_IP` | LXI discovery |
+| SCPI port | `--port 5024` | `SCOPE_PORT` | 5024 |
+| Discovery fallback subnet | `--subnet 10.0.0.0/24` | `SCOPE_SUBNET` | mDNS/SSDP only |
+| DUT IP | `--dut 10.0.0.9` | `DUT_IP` | skip the `/status` cross-check |
+| DUT API password | `--dut-pwd ***` | `DUT_PWD` | `?devicepwd=` sent empty |
+| Probe map | `--channels '{"1":{"name":"white","key":"whiteApplied"}}'` | `SCOPE_CHANNELS` | measure C1..C4 generically and say so |
+| Screenshots | `SCOPE_ALLOW_SCREENSHOT=1` | same | screenshots skipped |
+
+**Probe map — ask the user or pass it in.** Channel-to-signal wiring depends on how the probes are
+actually clipped, so it is a runtime parameter, not documentation. `--channels` is JSON keyed by
+channel number; `name` is the DUT status prefix (used for `whitePwmMin`, `yellowApplied`, …) and
+`key` is the field to display. Example (illustrative only — confirm with the user):
+
+```powershell
+python scripts\scope_lab.py pwm --dut <dut-ip> --dut-pwd <pw> `
+  --channels '{"1":{"name":"white","key":"whiteApplied"},'`
+             '"2":{"name":"yellow","key":"yellowApplied"},'`
+             '"3":{"name":"pump","key":"pumpSpeed"},'`
+             '"4":{"name":"fan","key":"fanSpeed"}}'
+```
+
+Typical questions to ask before the first run: *Which scope (if several were found)? Which DUT IP and
+API password? Which channel is on which PWM line? Does the channel use the LED calibration table or
+the linear fan/pump mapping?*
 
 ## Connection
 
-Use TCP port **5024** (Telnet-style with `>>` prompt). Port 5025 works but hangs after a timeout. Always close and reopen the connection after any read timeout.
+Use TCP port **5024** (Telnet-style with `>>` prompt). Port 5025 works but hangs after a timeout. Always close and reopen the connection after any read timeout. IPs in the examples below are placeholders — obtain the real one with `scope_discover.py`.
 
 The scope also speaks **VXI-11** (manual p.8): VISA resource string `TCPIP0::192.168.30.105::inst0::INSTR`.
 Port 111 (rpcbind) stays alive even when the instrument app wedges, but testing with pyvisa-py during
@@ -74,7 +112,7 @@ NOT a recovery channel; it is only an alternative client API for a healthy scope
 
 ```powershell
 $client = New-Object System.Net.Sockets.TcpClient
-$client.Connect("192.168.30.105", 5024)
+$client.Connect("<scope-ip>", 5024)   # from: python scripts\scope_discover.py
 $stream = $client.GetStream()
 $stream.ReadTimeout = 3000
 ```
@@ -128,8 +166,8 @@ Three ways to talk SCPI to this scope:
 | Client API | Resource / Port | Pros | Cons |
 |---|---|---|---|
 | Raw TCP socket (`TcpClient` / python `socket`) | port 5024 | Full control of prompt parsing; best timeout recovery; simplest for binary transfers (`PRIN?`) | Must handle `>>` prompt, command echo, occasional leading NUL, partial reads manually |
-| PyVISA SOCKET resource | `TCPIP0::192.168.30.105::5024::SOCKET` | Familiar VISA API; built-in timeout and buffering | Replies are misaligned by one query (see below) — avoid for this scope |
-| PyVISA VXI-11 | `TCPIP0::192.168.30.105::inst0::INSTR` | Highest-level standard instrument API; no prompt handling | Dies together with the instrument app (verified 2026-11-10: `VI_ERROR_RSRC_NFOUND` during wedge) — NOT a recovery channel |
+| PyVISA SOCKET resource | `TCPIP0::<scope-ip>::5024::SOCKET` | Familiar VISA API; built-in timeout and buffering | Replies are misaligned by one query (see below) — avoid for this scope |
+| PyVISA VXI-11 | `TCPIP0::<scope-ip>::inst0::INSTR` | Highest-level standard instrument API; no prompt handling | Dies together with the instrument app (verified 2026-11-10: `VI_ERROR_RSRC_NFOUND` during wedge) — NOT a recovery channel |
 
 PyVISA SOCKET gotchas (verified against the mock emulating the `>>` protocol on 2026-11-10):
 - The 5024 `>>` prompt is not newline-terminated. With `write_termination="\r\n"` and
@@ -1271,7 +1309,8 @@ are absent from the Programming Guide, so prefer the documented `SAVE:SET`/`REC:
 
 ## PWM Verification Workflow
 
-1. Get DUT status: `Invoke-RestMethod "http://192.168.30.74/status?devicepwd=pengping&mode=get"`
+1. Get DUT status: `Invoke-RestMethod "http://<dut-ip>/status?devicepwd=<dut-pwd>&mode=get"`
+   (ask the user for both, or pass `--dut` / `--dut-pwd`)
 2. Note `whiteApplied`, `yellowApplied`, `fanSpeed`, `pumpSpeed`
 3. For each active channel, enable `FREQ` and `DUTY` then read with `PAVA?`
 4. Compare measured duty against expected — the mapping differs per channel:
@@ -1349,7 +1388,7 @@ CURS OFF
 
 ## Crosstalk Check (CH3/CH4)
 
-CH3 (pump) and CH4 (fan) often show 25 kHz crosstalk from the LED PWM traces even when fan/pump are off. To confirm crosstalk: turn the light off (`GET .../light?devicepwd=pengping&mode=set&onOffStatus=0`), wait 3 s, re-measure. If the signal disappears, it is crosstalk, not real PWM output.
+CH3 (pump) and CH4 (fan) often show 25 kHz crosstalk from the LED PWM traces even when fan/pump are off. To confirm crosstalk: turn the light off (`GET .../light?devicepwd=<dut-pwd>&mode=set&onOffStatus=0`), wait 3 s, re-measure. If the signal disappears, it is crosstalk, not real PWM output.
 
 ## Browser / VNC Screenshot (fallback, attended only)
 
@@ -1364,9 +1403,9 @@ panel, readout bar and trigger settings.
 > remotely without a human present. This is the single most dangerous operation in this document.
 
 VNC view (observation is safe):
-- Open `http://192.168.30.105/Instrument/novnc/vnc_auto.php` directly. Do **not** click
+- Open `http://<scope-ip>/Instrument/novnc/vnc_auto.php` directly. Do **not** click
   "Instrument Control" in `welcome.php` — it often leaves you on the Instrument Information panel.
-- Password `12345678`; the WebSocket takes 5–10 s to paint. Read-only viewing is fine; key/mouse
+- Web password comes from the user (never stored here); the WebSocket takes 5–10 s to paint. Read-only viewing is fine; key/mouse
   injection over VNC is not a recovery path (see the wedge section).
 - The VNC URL comes from `js/main.js` (`zone_device_control` → `vnc_auto.php`).
 

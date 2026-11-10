@@ -1,8 +1,12 @@
 # vnc_probe.py — minimal RFB handshake probe for the SDS2204X HD
-import socket, struct, sys, time
+import os, socket, struct, sys, time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from scope_discover import find_scope
 
-HOST = "192.168.30.105"
+HOST = os.environ.get("SCOPE_IP")
 PORT = 5900
+if not HOST:
+    HOST, _ = find_scope(subnet=os.environ.get("SCOPE_SUBNET"))
 
 def recv_exact(s, n):
     buf = b""

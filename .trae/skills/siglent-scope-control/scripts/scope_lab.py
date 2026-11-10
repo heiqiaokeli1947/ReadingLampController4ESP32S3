@@ -1,18 +1,25 @@
 # scope_lab.py — Siglent SDS2204X HD experiment driver (raw socket, port 5024)
-# Usage: python scope_lab.py <experiment> [args]
-# Experiments: idn, single, wgen, meas, trig <type>, decode_uart, mtest, history, acquire, ref, vxi11_idn
-import socket, sys, time, os
+# Usage: python scope_lab.py <experiment> [--host IP] [--dut IP] [--dut-pwd PW] [--channels JSON]
+# Experiments: idn, single, wgen, pwm, meas, trig <type>, decode_uart, mtest, history, acquire,
+#              ref, params, save, runall, vxi11, vsock
+# Nothing is hardcoded: the scope is found over LXI (mDNS/SSDP) when --host/SCOPE_IP is absent,
+# the DUT comes from --dut/DUT_IP, and the probe map from --channels/SCOPE_CHANNELS.
+import socket, sys, time, os, json
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from scope_discover import find_scope
 
-SCOPE = os.environ.get("SCOPE_IP", "192.168.30.105")
 PORT = int(os.environ.get("SCOPE_PORT", "5024"))
+HOST = os.environ.get("SCOPE_IP")          # None => LXI discovery on first connect
 OUT = os.path.join(os.environ.get("TEMP", "."), "scope_lab")
 os.makedirs(OUT, exist_ok=True)
+RUNALL_STEP = "all"
 # Screenshots can raise a modal dialog on the scope screen and wedge the instrument app.
 # They are therefore opt-in: set SCOPE_ALLOW_SCREENSHOT=1 only when a person is at the scope.
 ALLOW_SHOT = os.environ.get("SCOPE_ALLOW_SCREENSHOT") == "1"
 
 class Scope:
-    def __init__(self, host=SCOPE, port=PORT, timeout=4.0):
+    def __init__(self, host=None, port=None, timeout=4.0):
+        host, port = find_scope(host or HOST, port or PORT, subnet=os.environ.get("SCOPE_SUBNET"))
         self.s = socket.create_connection((host, port), timeout=timeout)
         self.s.settimeout(timeout)
         self._read_to_prompt(1.5)
@@ -117,27 +124,56 @@ def exp_wgen(sc):
           sc.cmd("C1:BSWV OFST,1.65"), sc.cmd("C1:BSWV DUTY,50"))
     print("WGEN? ->", sc.cmd("C1:BSWV?"), " OUTP? ->", sc.cmd("C1:OUTP?"))
 
-def exp_pwm(sc):
-    """DUT status vs measured PWM: the project's core verification."""
-    import json, urllib.request
-    dut = os.environ.get("DUT_IP", "192.168.30.74")
-    pwd = os.environ.get("DUT_PWD", "pengping")
-    st = {}
+def _dut_cfg():
+    """DUT endpoint from --dut/--dut-pwd or DUT_IP/DUT_PWD; never hardcoded."""
+    return os.environ.get("DUT_IP"), os.environ.get("DUT_PWD")
+
+
+def _channel_map():
+    """Probe map from --channels / SCOPE_CHANNELS, e.g.
+    {"1": {"name": "white", "key": "whiteApplied"}, ...}
+    Returns None when not configured, in which case channels are measured generically."""
+    raw = os.environ.get("SCOPE_CHANNELS")
+    if not raw:
+        return None
     try:
-        with urllib.request.urlopen(f"http://{dut}/status?devicepwd={pwd}&mode=get", timeout=8) as r:
-            st = json.loads(r.read().decode())
-    except Exception as e:
-        print("DUT status FAIL:", type(e).__name__, e)
-    print(f"DUT {dut}: onOff={st.get('onOffStatus')} brightness={st.get('brightness')} "
-          f"colorTemp={st.get('colorTemperature')} whiteApplied={st.get('whiteApplied')} "
-          f"yellowApplied={st.get('yellowApplied')} fanSpeed={st.get('fanSpeed')} "
-          f"pumpSpeed={st.get('pumpSpeed')}")
-    print("PWM config:", {k: st.get(k) for k in
-                          ("whitePwmFreq", "yellowPwmFreq", "pumpPwmFreq", "fanPwmFreq",
-                           "whitePwmMin", "whitePwmMax", "yellowPwmMin", "yellowPwmMax",
-                           "pumpPwmMin", "pumpPwmMax", "fanPwmMin", "fanPwmMax")})
-    chans = [(1, "white", "whiteApplied"), (2, "yellow", "yellowApplied"),
-             (3, "pump", "pumpSpeed"), (4, "fan", "fanSpeed")]
+        return {int(k): v for k, v in json.loads(raw).items()}
+    except (ValueError, TypeError):
+        print("SCOPE_CHANNELS is not valid JSON; measuring channels generically")
+        return None
+
+
+def exp_pwm(sc):
+    """DUT status vs measured PWM: the project's core verification.
+    DUT and probe map must be supplied by the caller (ask the user, or pass --dut/--channels)."""
+    import urllib.request
+    dut, pwd = _dut_cfg()
+    st = {}
+    if dut:
+        try:
+            url = f"http://{dut}/status?devicepwd={pwd or ''}&mode=get"
+            with urllib.request.urlopen(url, timeout=8) as r:
+                st = json.loads(r.read().decode())
+        except Exception as e:
+            print("DUT status FAIL:", type(e).__name__, e)
+        print(f"DUT {dut}: onOff={st.get('onOffStatus')} brightness={st.get('brightness')} "
+              f"colorTemp={st.get('colorTemperature')} whiteApplied={st.get('whiteApplied')} "
+              f"yellowApplied={st.get('yellowApplied')} fanSpeed={st.get('fanSpeed')} "
+              f"pumpSpeed={st.get('pumpSpeed')}")
+        print("PWM config:", {k: st.get(k) for k in
+                              ("whitePwmFreq", "yellowPwmFreq", "pumpPwmFreq", "fanPwmFreq",
+                               "whitePwmMin", "whitePwmMax", "yellowPwmMin", "yellowPwmMax",
+                               "pumpPwmMin", "pumpPwmMax", "fanPwmMin", "fanPwmMax")})
+    else:
+        print("DUT not configured (--dut / DUT_IP); measuring without a /status cross-check")
+
+    cmap = _channel_map()
+    if cmap:
+        chans = [(ch, cfg.get("name", f"CH{ch}"), cfg.get("key")) for ch, cfg in sorted(cmap.items())]
+    else:
+        chans = [(ch, f"CH{ch}", None) for ch in (1, 2, 3, 4)]
+        print("probe map not configured (--channels / SCOPE_CHANNELS); assuming C1..C4 are connected")
+
     sc.cmd("C1:VDIV 0.5"); sc.cmd("C1:OFST 0"); sc.cmd("TDIV 1E-5")
     print(f"{'CH':<3}{'signal':<8}{'duty bound':<14}{'applied':<10}{'FREQ':<22}{'DUTY'}")
     for ch, name, key in chans:
@@ -148,11 +184,13 @@ def exp_pwm(sc):
         freq = sc.cmd(f"{c}:PAVA? FREQ").split(",")[-1]
         duty = sc.cmd(f"{c}:PAVA? DUTY").split(",")[-1]
         lo, hi = st.get(f"{name}PwmMin"), st.get(f"{name}PwmMax")
-        print(f"{c:<3}{name:<8}{str(lo)+'~'+str(hi)+'%':<14}{st.get(key, '?'):<10}{freq:<22}{duty}")
+        bound = f"{lo}~{hi}%" if lo is not None and hi is not None else "-"
+        applied = st.get(key, "?") if key else "-"
+        print(f"{c:<3}{name:<8}{bound:<14}{str(applied):<10}{freq:<22}{duty}")
     sc.screenshot(os.path.join(OUT, "pwm.png"))
-    print("expected: white/yellow duty = min + (max-min)*calibratePower(applied)/100 "
+    print("expected: LED channels use the firmware power-calibration table "
           "(calibratePower in domain/LightControllFSM.py; DO NOT linearise on 'applied'); "
-          "fan/pump duty = min + (max-min)*speed/100 (linear, no table).")
+          "fan/pump duty is linear in speed. Confirm the mapping with the user, do not assume it.")
 
 def exp_meas(sc):
     """MEAS:ADV vs MEAS:SIMP comparison."""
@@ -227,8 +265,9 @@ def exp_ref(sc):
 def exp_vxi11(_sc):
     import pyvisa
     rm = pyvisa.ResourceManager("@py")
+    host, _ = find_scope(HOST, PORT, subnet=os.environ.get("SCOPE_SUBNET"))
     try:
-        inst = rm.open_resource(f"TCPIP0::{SCOPE}::inst0::INSTR", timeout=8000)
+        inst = rm.open_resource(f"TCPIP0::{host}::inst0::INSTR", timeout=8000)
         print("VXI-11 *IDN? ->", inst.query("*IDN?"))
         inst.close()
     except Exception as e:
@@ -238,7 +277,8 @@ def exp_vsock(_sc):
     """PyVISA SOCKET resource on 5024 — live-verify prompt pollution behavior."""
     import pyvisa
     rm = pyvisa.ResourceManager("@py")
-    inst = rm.open_resource(f"TCPIP0::{SCOPE}::5024::SOCKET", timeout=5000)
+    host, _ = find_scope(HOST, PORT, subnet=os.environ.get("SCOPE_SUBNET"))
+    inst = rm.open_resource(f"TCPIP0::{host}::5024::SOCKET", timeout=5000)
     inst.write_termination = "\r\n"
     inst.read_termination = "\n"
     try:
@@ -338,7 +378,7 @@ def exp_params(sc):
 def exp_runall(sc):
     """Ordered safe suite for post-recovery validation; logs to scope_lab/runall.log."""
     logp = os.path.join(OUT, "runall.log")
-    step = sys.argv[2] if len(sys.argv) > 2 else "all"
+    step = RUNALL_STEP
     seq = [("idn", exp_idn), ("single", exp_single), ("display", exp_display),
            ("cursor", exp_cursor), ("dvm", exp_dvm), ("acquire", exp_acquire),
            ("meas", exp_meas), ("fft", exp_fft), ("history", exp_histplay),
@@ -359,12 +399,43 @@ def exp_runall(sc):
     print("log:", logp)
 
 if __name__ == "__main__":
-    name = sys.argv[1] if len(sys.argv) > 1 else "idn"
+    import argparse
+    ap = argparse.ArgumentParser(description="Siglent SDS2204X HD experiment driver")
+    ap.add_argument("name", nargs="?", default="idn", help="experiment name")
+    ap.add_argument("args", nargs="*", help="extra args (e.g. trigger type, runall step)")
+    ap.add_argument("--host", help="scope IP; default: SCOPE_IP or LXI discovery")
+    ap.add_argument("--port", type=int, help="SCPI port; default: SCOPE_PORT or 5024")
+    ap.add_argument("--subnet", help="e.g. 192.168.30.0/24 for TCP-scan discovery")
+    ap.add_argument("--dut", help="DUT IP for /status cross-check (or DUT_IP)")
+    ap.add_argument("--dut-pwd", help="DUT API password (or DUT_PWD)")
+    ap.add_argument("--channels", help='probe map JSON, e.g. {"1":{"name":"white","key":"whiteApplied"}}')
+    a = ap.parse_args()
+
+    if a.host:
+        HOST = a.host
+    if a.port:
+        PORT = a.port
+    if a.dut:
+        os.environ["DUT_IP"] = a.dut
+    if a.dut_pwd:
+        os.environ["DUT_PWD"] = a.dut_pwd
+    if a.channels:
+        os.environ["SCOPE_CHANNELS"] = a.channels
+    if a.subnet:
+        os.environ["SCOPE_SUBNET"] = a.subnet
+    if a.args and a.name == "runall":
+        RUNALL_STEP = a.args[0]
+
+    name = a.name
     if name == "vxi11":
         exp_vxi11(None); sys.exit(0)
     if name == "vsock":
         exp_vsock(None); sys.exit(0)
-    sc = Scope()
+    try:
+        sc = Scope()
+    except (RuntimeError, OSError) as e:
+        print("scope not reachable:", e)
+        sys.exit(2)
     try:
         fn = {"idn": exp_idn, "single": exp_single, "wgen": exp_wgen,
               "pwm": exp_pwm, "meas": exp_meas, "params": exp_params, "history": exp_histplay,
@@ -372,7 +443,7 @@ if __name__ == "__main__":
               "cursor": exp_cursor, "dvm": exp_dvm, "mask": exp_mask,
               "fft": exp_fft, "save": exp_save, "runall": exp_runall}.get(name)
         if name == "trig":
-            exp_trig(sc, sys.argv[2] if len(sys.argv) > 2 else "PULSE")
+            exp_trig(sc, a.args[0] if a.args else "PULSE")
         elif fn:
             fn(sc)
         else:
