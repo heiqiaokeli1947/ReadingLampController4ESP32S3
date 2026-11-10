@@ -18,9 +18,9 @@ Remote-control the Siglent SDS2204X HD oscilloscope to measure PWM signals from 
 Use TCP port **5024** (Telnet-style with `>>` prompt). Port 5025 works but hangs after a timeout. Always close and reopen the connection after any read timeout.
 
 The scope also speaks **VXI-11** (manual p.8): VISA resource string `TCPIP0::192.168.30.105::inst0::INSTR`.
-Port 111 (rpcbind) stays alive even when the instrument app wedges, so VXI-11 is worth trying as a
-recovery channel when 5024/5025 refuse connections — it may be served by a separate process.
-(Requires NI-VISA or pyvisa on the host; not yet tested on this setup.)
+Port 111 (rpcbind) stays alive even when the instrument app wedges, but testing with pyvisa-py during
+the 2026-11-10 wedge returned `VI_ERROR_RSRC_NFOUND` — VXI-11 dies with the instrument app, so it is
+NOT a recovery channel; it is only an alternative client API for a healthy scope.
 
 ```powershell
 $client = New-Object System.Net.Sockets.TcpClient
