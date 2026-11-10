@@ -846,6 +846,23 @@ DEC:BUS1:IIC:RWBit ADDR         # R/W bit position: ADDR|DATA
 
 **Serial triggers** (Programming Guide pp.399+, 561+): `:TRIGger:IIC`, `:TRIGger:SPI`, `:TRIGger:UART`, `:TRIGger:CAN`, `:TRIGger:LIN` subsystems — e.g. `TRIG:IIC:COND ADDR` + `TRIG:IIC:ADDR <addr>` triggers on a specific I2C address. Useful to trigger on ESP32 boot UART output or I2C transactions.
 
+**UART trigger** (manual pp.590–603) — trigger on ESP32 UART TX output (e.g. boot log or a specific log byte):
+```
+TRIG:TYPE UART
+TRIG:UART:TTYP RX         # trigger direction: RX|TX (which source to watch)
+TRIG:UART:RXS C2          # RX source channel (TXS for TX)
+TRIG:UART:RXT 1.65        # RX threshold V (TXT for TX); range ±(4.1*VDIV-OFST)
+TRIG:UART:BAUD 115200bps  # 600-115200bps or CUSTom,<300-20000000>
+TRIG:UART:DLEN 8          # data length [5, 8]
+TRIG:UART:STOP 1          # stop bits: 1|1.5|2
+TRIG:UART:PAR NONE        # parity: NONE|ODD|EVEN|MARK|SPACe
+TRIG:UART:BIT LSB         # bit order: LSB|MSB
+TRIG:UART:IDLE HIGH       # idle level: LOW|HIGH (TTL UART idle = HIGH; RS-232 = LOW)
+TRIG:UART:COND DATA       # condition: STARt|STOP|DATA|ERRor (frame/parity error)
+TRIG:UART:LIM EQU         # data compare (COND=DATA): EQUal|GREaterthan|LESSthan
+TRIG:UART:DATA 83         # trigger byte value, decimal (0x53='S'); 256 = don't care
+```
+
 Note: `DEC:BUS1:PROT?`/`RXSOUR?` may return empty even though set commands work (observed on this firmware). `DEC:BUS1:RES?` is the reliable way to pull decoded data.
 
 ## DVM (Digital Voltmeter)
