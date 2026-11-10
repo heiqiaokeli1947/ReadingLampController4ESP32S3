@@ -67,6 +67,34 @@ function Send-SCPI($stream, $cmd) {
 $null = Read-UntilPrompt $stream   # consume welcome banner
 ```
 
+## Client API Comparison (Raw Socket vs PyVISA)
+
+Three ways to talk SCPI to this scope:
+
+| Client API | Resource / Port | Pros | Cons |
+|---|---|---|---|
+| Raw TCP socket (`TcpClient` / python `socket`) | port 5024 | Full control of prompt parsing; best timeout recovery; simplest for binary transfers (`PRIN?`) | Must handle `>>` prompt, command echo, occasional leading NUL, partial reads manually |
+| PyVISA SOCKET resource | `TCPIP0::192.168.30.105::5024::SOCKET` | Familiar VISA API; built-in timeout and buffering | `>>` prompt bytes leak into reads (see below); wedged scope fails the same way as raw socket |
+| PyVISA VXI-11 | `TCPIP0::192.168.30.105::inst0::INSTR` | Highest-level standard instrument API; no prompt handling | Dies together with the instrument app (verified 2026-11-10: `VI_ERROR_RSRC_NFOUND` during wedge) — NOT a recovery channel |
+
+PyVISA SOCKET gotchas:
+- The 5024 `>>` prompt is not newline-terminated. With `read_termination = "\n"`, a query stops at the reply's newline and the trailing `>>` stays in the buffer, prefixing the NEXT read. Strip leading `>`/whitespace from every response (mechanism derived from the raw-socket protocol; live verification pending scope recovery).
+- Set both terminations explicitly: `write_termination = "\r\n"`, `read_termination = "\n"`.
+- Timeout is in milliseconds and raises `pyvisa.errors.VisaIOError` (`VI_ERROR_TMO`). Same rule as raw socket: close and reopen after any timeout.
+- Binary transfers (`PRIN? PNG`) need termination disabled + `read_raw()`/`read_bytes()` + manual prompt stripping — a raw socket is simpler for screenshots.
+
+```python
+import pyvisa
+rm = pyvisa.ResourceManager("@py")
+inst = rm.open_resource("TCPIP0::192.168.30.105::5024::SOCKET", timeout=5000)
+inst.write_termination = "\r\n"
+inst.read_termination = "\n"
+resp = inst.query("*IDN?").lstrip("> \r\n\x00")   # strip leaked prompt chars
+inst.close()
+```
+
+Recommendation: raw socket on 5024 for automation in this project (matches the PowerShell helpers above and `scope_lab.py`); PyVISA VXI-11 only as a cross-check on a healthy scope.
+
 ## Measurement Commands
 
 Enable a measurement before reading it. Use one channel per connection to avoid scope hangs.
