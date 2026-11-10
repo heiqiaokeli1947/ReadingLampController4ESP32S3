@@ -1348,12 +1348,23 @@ Observed 2026-11-10: the instrument app wedged (likely during an `ASET` + immedi
 | Port 80 (web) | OPEN | OPEN |
 | Port 5024 (SCPI telnet) | OPEN | **connection refused** |
 | Port 5025 (SCPI raw) | OPEN | connection refused |
-| Port 5900 (VNC) | OPEN | OPEN but stalls: sends `RFB 003.008` banner, completes security handshake, then never sends ServerInit |
+| Port 5900 (VNC) | OPEN | OPEN; raw RFB client gets banner + **ServerInit** (1024x600, 16bpp, name `Instrument`) but **no FramebufferUpdate ever arrives** |
 | Port 111 (rpcbind) | OPEN | OPEN |
 | HTTP proxy `device_read_write.php` `*IDN?` | `{"cmdrslt":"Siglent..."}` | `{"cmdrslt":"Device can not  be connected","err":"Device can not  be connected"}` |
 | Ports 22 (SSH), 23 (telnet) | closed | closed |
 
-**Recovery: physical power cycle only.** `SYSTem:REBoot` exists in SCPI but cannot be delivered (proxy reports device-not-connected; no reboot endpoint on the web server). VNC input cannot be delivered either (handshake never completes). When a wedge is suspected, confirm with the table above before blaming the network, then ask the user to power-cycle and poll port 5024 until it reopens (boot takes ~1–2 min).
+**Recovery: physical power cycle only.** `SYSTem:REBoot` exists in SCPI but cannot be delivered (proxy reports device-not-connected; no reboot endpoint on the web server). VNC input cannot be delivered either: the RFB handshake completes (server even sends ServerInit) but no frame is ever painted, so the UI compositor is frozen with the SCPI app. When a wedge is suspected, confirm with the table above before blaming the network, then ask the user to power-cycle and poll port 5024 until it reopens (boot takes ~1–2 min).
+
+### Raw RFB probing (no VNC client needed)
+
+A ~40-line RFB client is enough to fingerprint the scope: banner `RFB 003.008`, security types `[1]` (None — **no authentication**, anyone on the LAN can view/control the screen), then ServerInit `1024x600, bpp=16, depth=16, RGB565 (max 31/63/31, shifts 11/5/0)`, desktop name `Instrument`. When healthy this doubles as a framebuffer screenshot channel independent of `PRIN?`; when wedged, the handshake succeeds and the framebuffer request times out — a clean, non-invasive wedge test that leaves the SCPI service untouched.
+
+```python
+# minimal probe (see $env:TEMP\vnc_probe.py in the dev machine): connect :5900,
+# read 12-byte banner, send b"RFB 003.008\n", read 1-byte count + types,
+# choose type 1, read 4-byte security result (0), send b"\x01" (shared),
+# read width/height (4B), 16-byte pixel format, 4-byte name length + name.
+```
 
 ## Serial Bus Decode (DECode) Subsystem (manual pp.71–172)
 
