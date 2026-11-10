@@ -309,6 +309,24 @@ def exp_histplay(sc):
         print(f"{c} ->", sc.cmd(c))
     sc.cmd("HISTOR OFF")
 
+def exp_params(sc):
+    """PAVA type matrix: which measurement parameters return a value on this firmware.
+    The type list is the manual's :MEASure:SIMPle:ITEM set plus the wrong names seen in the wild."""
+    types = ("PKPK MAX MIN AMPL TOP BASE LEVELX CMEAN MEAN STDEV VSTD RMS CRMS "
+             "MEDIAN CMEDIAN OVSN FPRE OVSP RPRE PER FREQ TMAX TMIN PWID NWID DUTY "
+             "NDUTY WID NBWID DELAY TIMEL RISE FALL RISE20T80 FALL8020 CCJ PAREA "
+             "NAREA AREA ABSAREA CYCLES REDGES FEDGES EDGES PPULSES NPULSES "
+             "VPP VRMS VMAX VMIN VTOP VBASE AMP PW NW VAVG").split()
+    ok, empty = [], []
+    for t in types:
+        sc.cmd(f"C1:MEAS {t},ON", wait=0.25)
+        v = sc.cmd(f"C1:PAVA? {t}", wait=0.25)
+        sc.cmd(f"C1:MEAS {t},OFF", wait=0.2)
+        val = v.split(",")[-1].strip() if v else ""
+        (ok if val and "****" not in val and val != "?" else empty).append((t, val))
+    print(f"WORKS ({len(ok)}):", ", ".join(f"{t}={v}" for t, v in ok))
+    print(f"EMPTY ({len(empty)}):", ", ".join(t for t, _ in empty))
+
 def exp_runall(sc):
     """Ordered safe suite for post-recovery validation; logs to scope_lab/runall.log."""
     logp = os.path.join(OUT, "runall.log")
@@ -341,7 +359,7 @@ if __name__ == "__main__":
     sc = Scope()
     try:
         fn = {"idn": exp_idn, "single": exp_single, "wgen": exp_wgen,
-              "pwm": exp_pwm, "meas": exp_meas, "history": exp_histplay,
+              "pwm": exp_pwm, "meas": exp_meas, "params": exp_params, "history": exp_histplay,
               "acquire": exp_acquire, "ref": exp_ref, "display": exp_display,
               "cursor": exp_cursor, "dvm": exp_dvm, "mask": exp_mask,
               "fft": exp_fft, "save": exp_save, "runall": exp_runall}.get(name)

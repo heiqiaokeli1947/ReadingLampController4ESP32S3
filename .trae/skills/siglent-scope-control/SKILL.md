@@ -106,7 +106,7 @@ C1:MEAS DUTY,ON      # enable duty cycle
 C1:PAVA? DUTY        # read  -> C1:PAVA DUTY,9.48E+01%
 ```
 
-Working params: `FREQ`, `DUTY`, `PER`, `PKPK`, `RMS`, `MAX`, `MIN`, `RISE`, `FALL`. Params `VPP`, `VRMS`, `VMAX`, `VMIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `VAVG` return empty via SCPI (use `PKPK`/`RMS`/`MAX`/`MIN` instead). See the Measurements section below for details.
+Working params: `FREQ`, `DUTY`, `PER`, `PKPK`, `RMS`, `MAX`, `MIN`, `RISE`, `FALL`. Params `VPP`, `VRMS`, `VMAX`, `VMIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `VAVG` return empty via SCPI (use `PKPK`/`RMS`/`MAX`/`MIN` instead). Run `python scripts\scope_lab.py params` after recovery to confirm the full type matrix — it walks every `:MEASure:SIMPle:ITEM` type plus the known-bad names and reports WORKS/EMPTY. See the Measurements section below for details.
 
 Response values use scientific notation: `2.50E+04` = 25000, `9.48E+01` = 94.8. No signal returns `****` or empty.
 
@@ -1598,6 +1598,7 @@ python scripts\scope_lab.py idn       # *IDN?, TRIG:STAT?, ACQ:SRAT?
 python scripts\scope_lab.py single    # CH1 config -> SINGLE -> RUN -> poll Stop -> PRIN? PNG
 # Read $env:TEMP\scope_lab\single.png and confirm a 25 kHz PWM square wave is on screen
 python scripts\scope_lab.py pwm       # DUT /status vs measured FREQ/DUTY on C1..C4 + pwm.png
+python scripts\scope_lab.py params    # PAVA type matrix -> WORKS / EMPTY lists
 python scripts\scope_lab.py runall    # ordered suite, appends to scope_lab\runall.log
 ```
 
