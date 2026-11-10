@@ -1363,3 +1363,26 @@ Threshold range for SDS2000X HD: `[-4.1*VDIV - OFST, +4.1*VDIV - OFST]` (same cl
 :DECode:BUS1:MANChester:DISPlay WORD   # result display: WORD|BIT
 :DECode:BUS1:MANChester:BITorder MSB
 ```
+
+## Acquisition (ACQuire) Subsystem (manual pp.25–38)
+
+```
+:ACQuire:TYPE NORMal          # NORMal|PEAK|AVERage[,times]|ERES[,bits]
+                              #   AVERage times: 4|16|32|64|128|256|512|1024
+                              #   ERES bits: 0.5|1.0|1.5|2.0|2.5|3.0 (boxcar filter, less noise at slow sweeps)
+                              #   NOTE: AVERage/ERES not available when SEQuence is ON
+:ACQuire:MODE YT              # YT|XY|ROLL (ROLL = strip-chart, for slow events)
+:ACQuire:MMANagement AUTO     # memory mgmt: AUTO (max sample rate) | FSRate (fixed rate) | FMDepth (fixed depth)
+:ACQuire:MDEPth 200M          # SDS2000X HD: single-ch {20k|200k|2M|20M|200M}, dual-ch {10k|100k|1M|10M|100M}
+                              #   reduced when digital ch on / AVERage/ERES / ROLL mode
+:ACQuire:SRATe 5.00E9         # fixed sample rate (FSRate mode); auto-clamped to settable value
+:ACQuire:AMODe FAST           # capture rate: FAST|SLOW (FAST helps catch anomalies)
+:ACQuire:INTerpolation ON     # ON = sinx/x (sinc), OFF = linear
+:ACQuire:RESolution 10Bits    # ADC bits: 8Bits|10Bits (SDS2000X Plus / HD)
+:ACQuire:SEQuence ON          # segmented memory mode (fast re-arm, capture bursts)
+:ACQuire:SEQuence:COUNt 100   # number of segments (max depends on depth/timebase)
+:ACQuire:CSWeep               # command only: clear sweeps & restart acquisition
+:ACQuire:NUMAcq?              # query: acquisitions since start (reset on setting change)
+:ACQuire:POINts?              # query: sample points of current waveform, e.g. 1.25E+08
+```
+Short form: `ACQ`.
