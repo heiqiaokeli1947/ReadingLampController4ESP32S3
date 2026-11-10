@@ -1230,12 +1230,14 @@ are absent from the Programming Guide, so prefer the documented `SAVE:SET`/`REC:
 1. Get DUT status: `Invoke-RestMethod "http://192.168.30.74/status?devicepwd=pengping&mode=get"`
 2. Note `whiteApplied`, `yellowApplied`, `fanSpeed`, `pumpSpeed`
 3. For each active channel, enable `FREQ` and `DUTY` then read with `PAVA?`
-4. Compare measured duty against expected:
-   - `calPct = calibratePower(applied, WHITE_CALC_TABLE | YELLOW_CALC_TABLE)` — 23-point current-table
-     interpolation in `domain/LightControllFSM.py`; if an older doc says to use `applied` directly, that is wrong
-   - `actualDuty = minDuty + (maxDuty - minDuty) * calPct / 100`
-   - worked example (2026-11-10): applied=25.5 -> calPct(white)=76.71% -> duty=6+94*0.7671=78.1%;
-     the naive `6+94*0.255=30.0%` is off by ~48 points
+4. Compare measured duty against expected — the mapping differs per channel:
+   - LEDs (white/yellow): `calPct = calibratePower(applied, WHITE_CALC_TABLE | YELLOW_CALC_TABLE)` —
+     23-point current-table interpolation in `domain/LightControllFSM.py`; then
+     `actualDuty = minDuty + (maxDuty - minDuty) * calPct / 100`
+     Worked example (2026-11-10): applied=25.5 -> calPct(white)=76.71% -> duty=6+94*0.7671=78.1%;
+     the naive `6+94*0.255=30.0%` is off by ~48 points.
+   - Fan/pump: `ThermalControlFSM` calls `setPwm(ch, freq, min, max, speed*10)` with NO calibration table,
+     so `actualDuty = minDuty + (maxDuty - minDuty) * speed / 100` (e.g. fanSpeed=50, 10/100 -> 55%).
    - minDuty: white=6, yellow=5, fan=10, pump=15; maxDuty=100 for all (verified live via `/status` on 2026-11-10)
    - `main.py` defaults are 15% for all four channels, so ALWAYS read `*PwmMin/*PwmMax` from `/status` instead of hard-coding
 

@@ -144,9 +144,9 @@ def exp_pwm(sc):
         lo, hi = st.get(f"{name}PwmMin"), st.get(f"{name}PwmMax")
         print(f"{c:<3}{name:<8}{str(lo)+'~'+str(hi)+'%':<14}{st.get(key, '?'):<10}{freq:<22}{duty}")
     sc.screenshot(os.path.join(OUT, "pwm.png"))
-    print("expected: duty = min + (max-min) * calibratePower(applied)/100. "
-          "calibratePower() in domain/LightControllFSM.py maps brightness->current->PWM; "
-          "DO NOT linearise on 'applied' (applied=25.5 -> ~78% duty, not ~30%).")
+    print("expected: white/yellow duty = min + (max-min)*calibratePower(applied)/100 "
+          "(calibratePower in domain/LightControllFSM.py; DO NOT linearise on 'applied'); "
+          "fan/pump duty = min + (max-min)*speed/100 (linear, no table).")
 
 def exp_meas(sc):
     """MEAS:ADV vs MEAS:SIMP comparison."""
