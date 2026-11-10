@@ -1521,3 +1521,30 @@ Gaps found during the audit and fixed the same day: `DISP:GRAT` (grid brightness
 `MTES:IDIS` (mask-test result panel). Read-only helpers worth knowing: `WAV:MAXPoint?`
 (max points per transfer piece), `FUNC<n>:FFT:HSCale?`, `CURS<n>:IXDelta?/XDELta?/YDELta?`
 (cursor deltas are queries only - move the cursors with `CURS:X1/X2/Y1/Y2`).
+
+## Wedge Diagnosis & Post-Recovery Runbook
+
+Observed 2026-11-10: the instrument application wedged while SCPI was idle-disconnected.
+
+| Symptom | Meaning |
+|---|---|
+| Test-NetConnection <ip> -Port 80 = True | network stack + web server alive |
+| Test-NetConnection <ip> -Port 5024 = False (connection refused / timeout) | the SCPI **application** is dead, not the network |
+| web /SCPI_control.php accepts the page but never returns command results | same application stall |
+| PyVISA VXI-11 open_resource -> VI_ERROR_RSRC_NFOUND | rpcbind (111) responds, instrument app does not |
+| Port 5025 also refuses | confirms app-level, not port-level failure |
+
+No software recovery exists (no SYST:REBoot reachable, VXI-11 dead): **physically power-cycle the scope**, wait ~40 s, then re-test 5024.
+Nothing in the SCPI flow above caused the wedge — it appeared during a long idle period, so treat "SCPI stops answering" as an instrument-side fault first, client bug second.
+
+Post-recovery validation order (each step must pass before the next):
+
+`powershell
+python C:\Users\ADMINI~1\AppData\Local\Temp\scope_lab.py idn       # *IDN?, TRIG:STAT?, ACQ:SRAT?
+python C:\Users\ADMINI~1\AppData\Local\Temp\scope_lab.py single    # CH1 config -> SINGLE -> RUN -> poll Stop -> PRIN? PNG
+# Read C:\Users\ADMINI~1\AppData\Local\Temp\scope_lab\single.png and confirm a 25 kHz PWM square wave is on screen
+python C:\Users\ADMINI~1\AppData\Local\Temp\scope_lab.py runall    # ordered suite, appends to scope_lab\runall.log
+`
+
+unall executes idn -> single -> display -> cursor -> dvm -> acquire -> meas -> fft -> history -> ref -> mask.
+Individual steps can be re-run: python C:\Users\ADMINI~1\AppData\Local\Temp\scope_lab.py runall fft.
