@@ -1152,8 +1152,12 @@ ACQ:CSW                   # clear sweep
 ## System / Error
 ```
 *OPC?                 # operation complete -> 1
+*RST                  # reset to default config (same as front-panel Default button)
 SYST:ERR?             # last error, e.g. -113,"Undefined header;..."
 ```
+Note: the manual lists only `*IDN`, `*OPC`, `*RST` as common commands (p.18), but this firmware
+also accepts `*CLS`, `*STB?`, `*SAV`/`*RCL` (verified). `*ESE`/`*SRE`/`*TRG`/`*TST?` are not
+documented — use `*STB?`/`SYST:ERR?` for status.
 
 ## PWM Verification Workflow
 
