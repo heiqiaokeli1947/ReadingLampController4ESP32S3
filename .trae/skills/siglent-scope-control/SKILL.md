@@ -1348,10 +1348,21 @@ Observed 2026-11-10: the instrument app wedged (likely during an `ASET` + immedi
 | Port 80 (web) | OPEN | OPEN |
 | Port 5024 (SCPI telnet) | OPEN | **connection refused** |
 | Port 5025 (SCPI raw) | OPEN | connection refused |
-| Port 5900 (VNC) | OPEN | OPEN; raw RFB client gets banner + **ServerInit** (1024x600, 16bpp, name `Instrument`) but **no FramebufferUpdate ever arrives** |
+| Port 5900 (VNC) | OPEN | OPEN; raw RFB client gets banner + **ServerInit** (1024x600, 16bpp, name `Instrument`) but **no FramebufferUpdate ever arrives**. Sending one `FramebufferUpdateRequest` (any size: 1x1, 16x16, full frame; any pixel format) makes the server close the connection immediately (EOF, 0 payload) and then **5900 switches to connection-refused** — the VNC daemon crashes and does not respawn (observed 08:52 2026-11-10). So probe 5900 at most once per wedge |
 | Port 111 (rpcbind) | OPEN | OPEN |
-| HTTP proxy `device_read_write.php` `*IDN?` | `{"cmdrslt":"Siglent..."}` | `{"cmdrslt":"Device can not  be connected","err":"Device can not  be connected"}` |
-| Ports 22 (SSH), 23 (telnet) | closed | closed |
+| HTTP proxy `device_read_write.php` `*IDN?` | `{"cmdrslt":"Siglent..."}` | `{"cmdrslt":"Device can not  be connected","err":"Device can not  be connected"}` — same for `to` = `127.0.0.1`, `192.168.30.105`, `localhost`, `127.0.0.1:5024`; the PHP proxy uses a loopback SCPI link that dies with the app |
+| Web home page instrument info | filled | **blank** (model/serial/software come from `*IDN?` through the same proxy) |
+| Ports 22 (SSH), 23 (telnet), 4880 (HiSLIP) | closed | closed |
+
+The web SCPI proxy endpoint (works while the web server lives; the only HTTP path worth trying during a wedge):
+```
+POST http://192.168.30.105/device_read_write.php
+Content-Type: application/x-www-form-urlencoded
+cmd={"cmd":"*IDN?","type":"ds","to":"127.0.0.1"}   # JSON, URL-encoded
+action=excutescpicmds
+-> {\"success\":true}\r\n{\"retCount\":1}\r\n{\"cmdrslt\":\"...\"}
+```
+Web stack is lighttpd/1.4.35 + PHP/5.4.5. No reboot/restart endpoint exists (`/reboot`, `/restart`, `/system/reboot`, `/reboot.cgi`, `/cgi-bin/reboot` all 404), so HTTP cannot self-recover. PowerShell `Invoke-WebRequest` sends `Expect: 100-continue` and lighttpd answers **417**; use `curl.exe --data-urlencode` (or disable `ServicePoint.ExpectContinue`).
 
 **Recovery: physical power cycle only.** `SYSTem:REBoot` exists in SCPI but cannot be delivered (proxy reports device-not-connected; no reboot endpoint on the web server). VNC input cannot be delivered either: the RFB handshake completes (server even sends ServerInit) but no frame is ever painted, so the UI compositor is frozen with the SCPI app. When a wedge is suspected, confirm with the table above before blaming the network, then ask the user to power-cycle and poll port 5024 until it reopens (boot takes ~1–2 min).
 
