@@ -1,13 +1,17 @@
 """scope_wait.py - wait for the Siglent SDS2204X HD to come back, then verify the PWM closed loop.
 
 Typical use: power-cycle the scope, then run this. It polls the SCPI port until it accepts a
-connection, then runs the requested experiments (default: idn,single,pwm) and exits non-zero if
-the scope never answers.
+connection, then runs the requested experiments (default: idn,pwm — no screenshots) and exits
+non-zero if the scope never answers.
+
+Screenshots are unsafe unattended (they raise a modal dialog that wedges the instrument app), so
+the default suite deliberately avoids `single`. Add it only with SCOPE_ALLOW_SCREENSHOT=1 and a
+person standing at the scope.
 
 Usage:
-    python scope_wait.py                        # poll forever, 10 s interval, idn+single+pwm
+    python scope_wait.py                        # poll forever, 10 s interval, idn+pwm
     python scope_wait.py --timeout 900          # give up after 15 min
-    python scope_wait.py --suite idn,pwm        # custom sequence
+    python scope_wait.py --suite idn,pwm,params # custom sequence
     python scope_wait.py --interval 5 --quiet   # only print on state change
 Environment: SCOPE_IP (default 192.168.30.105), SCOPE_PORT (default 5024).
 """
@@ -33,7 +37,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--interval", type=float, default=10.0, help="seconds between probes")
     ap.add_argument("--timeout", type=float, default=0, help="stop after N seconds (0 = forever)")
-    ap.add_argument("--suite", default="idn,single,pwm", help="comma-separated experiments")
+    ap.add_argument("--suite", default="idn,pwm", help="comma-separated experiments")
     ap.add_argument("--quiet", action="store_true", help="only print when the port state changes")
     args = ap.parse_args()
 

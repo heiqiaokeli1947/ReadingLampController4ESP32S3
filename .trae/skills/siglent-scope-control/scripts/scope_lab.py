@@ -7,6 +7,9 @@ SCOPE = os.environ.get("SCOPE_IP", "192.168.30.105")
 PORT = int(os.environ.get("SCOPE_PORT", "5024"))
 OUT = os.path.join(os.environ.get("TEMP", "."), "scope_lab")
 os.makedirs(OUT, exist_ok=True)
+# Screenshots can raise a modal dialog on the scope screen and wedge the instrument app.
+# They are therefore opt-in: set SCOPE_ALLOW_SCREENSHOT=1 only when a person is at the scope.
+ALLOW_SHOT = os.environ.get("SCOPE_ALLOW_SCREENSHOT") == "1"
 
 class Scope:
     def __init__(self, host=SCOPE, port=PORT, timeout=4.0):
@@ -40,6 +43,9 @@ class Scope:
         return " | ".join(lines)
 
     def screenshot(self, path, fmt="PNG"):
+        if not ALLOW_SHOT:
+            print("[skip] screenshot disabled (set SCOPE_ALLOW_SCREENSHOT=1, attended only)")
+            return 0, False
         self.s.sendall(f"PRIN? {fmt}\r\n".encode())
         time.sleep(1.0)
         data = b""
