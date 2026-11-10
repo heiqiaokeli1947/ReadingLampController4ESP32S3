@@ -636,18 +636,43 @@ MEM1:LAB ON               # show label; MEM1:LAB:TEXT "PWM_ref" (max 20 chars)
 ```
 
 ## Search
-Count and navigate edges/pulses in the acquired waveform.
+Count and navigate edges/pulses in the acquired waveform (manual pp.330–368).
 ```
 SEAR ON                   # enable search
-SEAR:EDGE:SOUR C1         # search source
+SEAR:MODE EDGE            # search mode: EDGE|SLOPe|PULSE|INTerval|RUNT
+SEAR:EDGE:SOUR C1         # search source (C1-C4, D0-D15)
 SEAR:EDGE:SLOP POS        # search slope
 SEAR:EDGE:LEV 0.7         # search level
-SEAR:COUN?                # number of found events -> 4
-SEAR:EVEN?                # current event index -> 3
+SEAR:COUN?                # number of found events on current screen -> 4
+SEAR:EVEN?                # event index at screen center (acquisition stopped) -> 3
 SEAR:EVEN 1               # go to event 1
 SEAR:NAV NEXT             # next event
 SEAR:NAV PREV             # previous event
+SEAR:COPY FROM            # copy trigger settings INTO search (FROMtrigger|TOTRigger|CANCel)
 SEAR OFF                  # disable search
+```
+
+Non-edge search modes mirror their trigger counterparts (level range [-4.1*VDIV-OFST, 4.1*VDIV-OFST], time bounds [2E-9, 20] s):
+```
+# Pulse-width search — find abnormally wide/narrow pulses in captured PWM:
+SEAR:MODE PULSE
+SEAR:PULS:SOUR C1; SEAR:PULS:POL POS; SEAR:PULS:LEV 0.7
+SEAR:PULS:LIM LESS        # LESSthan|GREATerthan|INNer|OUTer
+SEAR:PULS:TLOW 1.0E-6; SEAR:PULS:TUPP 4.0E-5
+# Interval search — find period jitter / missing pulses:
+SEAR:MODE INTERVAL
+SEAR:INT:SOUR C1; SEAR:INT:SLOP RIS; SEAR:INT:LEV 0.7
+SEAR:INT:LIM GREAT; SEAR:INT:TLOW 3.9E-5; SEAR:INT:TUPP 4.1E-5
+# Slope search — find slow edges (two levels + time limit):
+SEAR:MODE SLOPE
+SEAR:SLOP:SOUR C1; SEAR:SLOP:SLOP RIS
+SEAR:SLOP:LLEV 0.3; SEAR:SLOP:HLEV 0.9
+SEAR:SLOP:LIM GREAT; SEAR:SLOP:TLOW 2.0E-9; SEAR:SLOP:TUPP 3.0E-8
+# Runt search — find pulses that fail to reach full amplitude:
+SEAR:MODE RUNT
+SEAR:RUNT:SOUR C1; SEAR:RUNT:POL POS
+SEAR:RUNT:LLEV 0.3; SEAR:RUNT:HLEV 0.9
+SEAR:RUNT:LIM GREAT; SEAR:RUNT:TLOW 2.0E-9; SEAR:RUNT:TUPP 2.0E+1
 ```
 
 ## Horizontal Position
