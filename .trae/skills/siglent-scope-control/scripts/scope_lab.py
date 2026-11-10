@@ -103,11 +103,13 @@ def exp_single(sc):
 
 def exp_wgen(sc):
     """Built-in waveform generator -> loop back or just verify commands."""
-    print("WGEN OUTP ON:", sc.cmd("WGEN:OUTP ON"))
-    print("WGEN PULSE 25k:", sc.cmd("WGEN:BSWV WVTP,PULSE"),
-          sc.cmd("WGEN:BSWV FRQ,25000"), sc.cmd("WGEN:BSWV AMP,3.3"),
-          sc.cmd("WGEN:BSWV OFST,1.65"), sc.cmd("WGEN:BSWV DUTY,50"))
-    print("WGEN? ->", sc.cmd("WGEN:BSWV?"))
+    # WGEN commands are SDG-style: the channel prefix is C1, NOT "WGEN"
+    # (manual p.681: "The WGEN commands are the same as that of Siglent SDG series")
+    print("WGEN OUTP ON:", sc.cmd("C1:OUTP ON"))
+    print("WGEN PULSE 25k:", sc.cmd("C1:BSWV WVTP,PULSE"),
+          sc.cmd("C1:BSWV FRQ,25000"), sc.cmd("C1:BSWV AMP,3.3"),
+          sc.cmd("C1:BSWV OFST,1.65"), sc.cmd("C1:BSWV DUTY,50"))
+    print("WGEN? ->", sc.cmd("C1:BSWV?"), " OUTP? ->", sc.cmd("C1:OUTP?"))
 
 def exp_pwm(sc):
     """DUT status vs measured PWM: the project's core verification."""
@@ -150,7 +152,9 @@ def exp_meas(sc):
     print("ADV P1 FREQ:", sc.cmd("MEAS:ADV:P1:TYPE FREQ"), sc.cmd("MEAS:ADV:P1:SOURce1 C1"))
     print("P1 VAL ->", sc.cmd("MEAS:ADV:P1:VALue?"))
     print("ADV stats:", sc.cmd("MEAS:ADV:STAT ON"), sc.cmd("MEAS:ADV:P1:STATistics?"))
-    print("SIMP:", sc.cmd("MEAS:SIMP:ITEM PWID,C1"), sc.cmd("MEAS:SIMP:VALue?"))
+    # SIMP:ITEM takes <param>,<ON|OFF>; the channel is set by SIMP:SOUR (manual p.278-280)
+    print("SIMP:", sc.cmd("MEAS:SIMP:SOUR C1"), sc.cmd("MEAS:SIMP:ITEM PWID,ON"),
+          sc.cmd("MEAS:SIMP:VAL? PWID"))
 
 def exp_trig(sc, t):
     """Exercise one advanced trigger type with project-relevant params."""
@@ -206,9 +210,11 @@ def exp_acquire(sc):
         print(f"{c} ->", sc.cmd(c))
 
 def exp_ref(sc):
-    print("save REF:", sc.cmd("SAVE:REF \"local/ref_c1\",C1"))
-    print("REFA on:", sc.cmd("REFA ON"))
+    # REF slots REFA-REFD: :REF<r>:DATA <LOAD|UNLoad|SAVE,<src>> (manual pp.316-321)
+    print("REFA save C1:", sc.cmd("REFA:DATA SAVE,C1"))
+    print("REFA load:", sc.cmd("REFA:DATA LOAD"))
     print("REFA:DATA:SOUR? ->", sc.cmd("REFA:DATA:SOURce?"))
+    print("REFA:LAB ON:", sc.cmd("REFA:LAB ON"), "->", sc.cmd("REFA:LAB?"))
 
 def exp_vxi11(_sc):
     import pyvisa
@@ -241,20 +247,20 @@ def exp_vsock(_sc):
 
 def exp_display(sc):
     """DISPlay subsystem (manual pp.188-199)."""
-    for c in ["DISP:GRAT 50", "DISP:GRAT?", "DISP:GRIDS LIGH", "DISP:GRIDS?",
+    for c in ["DISP:GRAT 50", "DISP:GRAT?", "DISP:GRID LIGH", "DISP:GRID?",
               "DISP:TRAN 80", "DISP:TRAN?", "DISP:BACK 100", "DISP:BACK?",
-              "DISP:INT 75,100", "DISP:INT?", "DISP:TYPE VECT", "DISP:TYPE?",
+              "DISP:INT 75", "DISP:INT?", "DISP:TYPE VECT", "DISP:TYPE?",
               "DISP:COL OFF", "DISP:COL?", "DISP:AXIS ON", "DISP:AXIS?",
               "DISP:MENU EMB", "DISP:MENU?"]:
         print(f"{c} ->", sc.cmd(c))
 
 def exp_cursor(sc):
     """CURSor subsystem (manual pp.55-70)."""
-    for c in ["CURS:MODE MAN,X", "CURS:MODE?", "CURS:SOUR1 C1", "CURS:SOUR1?",
+    for c in ["CURS ON", "CURS:MODE MAN,X", "CURS:MODE?", "CURS:SOUR1 C1", "CURS:SOUR1?",
               "CURS:TAGS FIX", "CURS:TAGS?", "CURS:XREF DEL", "CURS:XREF?",
               "CURS:YREF OFFS", "CURS:YREF?", "CURS:X1 0", "CURS:X1?",
               "CURS:X2 2.5E-5", "CURS:X2?", "CURS:Y1 0", "CURS:Y1?", "CURS:Y2 1",
-              "CURS:Y2?", "CURS:XDEL?", "CURS:IXDEL?", "CURS:YDEL?"]:
+              "CURS:Y2?", "CURS:XDEL?", "CURS:IXD?", "CURS:YDEL?"]:
         print(f"{c} ->", sc.cmd(c))
 
 def exp_dvm(sc):
@@ -290,8 +296,7 @@ def exp_fft(sc):
 
 def exp_save(sc):
     """SAVe/RECall setup round-trip (manual pp.306-314)."""
-    for c in ["SAVE:SETup \"local/lab_setup\"",
-              "REC:SETup \"local/lab_setup\"",
+    for c in ["SAVE:SET INT,1", "REC:SET INT,1",
               "SAVE:IMAGe \"local/SIGLENT/lab.png\",PNG,OFF",
               "REC:FDEF"]:
         print(f"{c} ->", sc.cmd(c))

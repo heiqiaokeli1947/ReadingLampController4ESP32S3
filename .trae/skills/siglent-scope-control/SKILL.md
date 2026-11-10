@@ -468,6 +468,28 @@ C1:PAVA? FALL         # read -> C1:PAVA FALL,4.70E-09s
 - `C1:IMP?` — impedance query returns empty (SDS2204X HD is 1MΩ only, no 50Ω option)
 - `DISP:PERS ON` — accepted but `DISP:PERS?` still returns OFF (persistence may not be controllable via SCPI)
 
+## Programming-Guide Audit (2026-11-10, offline)
+
+Every command in `scope_lab.py` was cross-checked against the 757-page SDS Programming Guide.
+Findings that change how you write commands:
+
+| Topic | Wrong / assumed | Correct (per manual) |
+|---|---|---|
+| WGEN prefix | `WGEN:BSWV`, `WGEN:OUTP` | SDG-style with channel prefix: `C1:BSWV`, `C1:OUTP`, `C1:SYNC`, `C1:ARWV`, `STL?`, `VOLTPRT` (p.681) |
+| Setup save/recall | `SAVE:SETup "local/name"` | `SAVE:SET INT,<1-10>` or `SAVE:SET EXT,"local/xxx.xml"`; likewise `REC:SET INT,1` (pp.313,328) |
+| Grid style | `DISP:GRIDS LIGH` | `DISP:GRID LIGH` — `:DISPlay:GRIDstyle` with {FULL\|LIGHt\|NONE} (p.194) |
+| Cursor instantaneous delta | `CURS:IXDEL?` | query-only `CURS:IXD?` (`:CURSor:IXDelta?`, p.57) |
+| Reference display | `REFA ON` | no such command; `REFA:DATA SAVE,C1` / `REFA:DATA LOAD` / `REFA:DATA UNLoad` (p.317) |
+| Intensity | `DISP:INT 75,100` | single value: `DISP:INT 75` (p.195) |
+| Simple measurement | `MEAS:SIMP:ITEM PWID,C1` / `MEAS:SIMP:VALue?` | `MEAS:SIMP:SOUR C1`, `MEAS:SIMP:ITEM PWID,ON`, `MEAS:SIMP:VAL? PWID` (pp.278-280) |
+
+Firmware extensions **not present in the Programming Guide** (verified working on this unit, but do
+not assume portability to other Siglent models):
+- `C1:MEAS <param>,ON` and `C1:PAVA? <param>` — the documented equivalents are
+  `MEAS:SIMP:ITEM/VAL?` and `MEAS:ADV:P<n>:*`. PAVA is the fastest read path on this firmware.
+
+Manual typos found: p.421 prints `TRIG:SIOP:LIM LESS` (real key is `TRIG:SLOP:LIM`).
+
 ## SCPI Response Format Note
 
 All query responses are prefixed with a `0x00` null byte before the actual data. When using `StreamReader.ReadLine()`, this null byte appears as a leading character. Strip it with `$resp.TrimStart([char]0)`. Some responses (like `WAV:DATA?`) use binary block format with the same leading null byte.
