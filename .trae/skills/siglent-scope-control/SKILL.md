@@ -321,6 +321,42 @@ TRIG:VID:LCNT 625         # total lines per frame [300, 2000]
 TRIG:VID:FRAT 50Hz        # frame rate: 25Hz|30Hz|50Hz|60Hz
 ```
 
+### Trigger Cross-Type Details (manual pp.405–548)
+
+These three setting families exist for **every** analog trigger type (EDGE, PULSe, SLOPe,
+INTerval, DROPout, RUNT, WINDow, PATTern, NEDGe) with identical syntax — replace `<T>` with
+the type prefix (`EDGE|PULS|SLOP|INT|DROP|RUNT|WIND|PATT|NEDG`). DELay has COUPling only.
+
+```
+TRIG:<T>:COUP DC          # trigger-path coupling: DC|AC|LFREJect|HFREJect
+                          # AC removes dc offset; HFREJect low-passes rf noise;
+                          # LFREJect high-passes e.g. power-line hum
+TRIG:<T>:NREJ ON          # noise reject ON|OFF (extra hysteresis, rejects glitches)
+TRIG:<T>:HOLD TIMe        # holdoff mode: OFF|EVENts|TIMe
+TRIG:<T>:HLDT 1.5E-8      # holdoff time, SDS2000X HD range [8ns, 30s]
+TRIG:<T>:HLDEV 3          # holdoff event count [1, 100000000]
+TRIG:<T>:HST LAST_TRIG    # holdoff reference: LAST_TRIG (from last trigger) |
+                          # ACQ_START (from acquisition start)
+```
+
+Type-specific extras found only in the manual:
+
+```
+# Window trigger — levels can be entered two ways (either pair defines the window):
+TRIG:WIND:LLEV 0.2 / TRIG:WIND:HLEV 1.2     # absolute low/high levels (V)
+TRIG:WIND:CLEV 0.7 / TRIG:WIND:DLEV 0.5     # OR center level + delta (V), range ±(4.1*VDIV-OFST)
+
+# Pattern trigger — logic combination of the per-channel states:
+TRIG:PATT:LOG AND         # AND|OR|NAND|NOR (default AND)
+
+# Delay trigger — trigger-path coupling (no holdoff family on DELay):
+TRIG:DEL:COUP DC          # DC|AC|LFREJect|HFREJect
+
+# Nth-edge trigger — has its own level and noise reject:
+TRIG:NEDG:LEV 0.5         # trigger level (V), range ±(4.1*VDIV-OFST)
+TRIG:NEDG:NREJ ON         # noise reject ON|OFF
+```
+
 **SCPI server hang warning:** Do NOT send `ASET` and immediately close the TCP connection — the scope's SCPI server (port 5024) can hang while ASET is processing, refusing new connections (web UI on port 80 stays alive). Wait for ASET to complete (~3-5s, poll `*OPC?`) before disconnecting. If hung, wait several minutes or power-cycle the scope. Note: when the instrument app wedges, BOTH raw 5024 and the HTTP proxy backend report "Device can not be connected" — only a power cycle (or long watchdog timeout) recovers.
 
 ## Alternative Channel: HTTP SCPI Proxy
