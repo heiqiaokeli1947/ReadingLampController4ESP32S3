@@ -445,6 +445,8 @@ DISP:INT 75,100       # intensity: waveform%,grid%
 DISP:GRIDS LIGH       # grid style: FULL|LIGHt|NONE
 DISP:TRAN 80          # menu transparency 0-100
 DISP:CLE              # clear display/persistence
+DISP:MENU EMB         # menu style: EMBedded|FLOating
+DISP:TYPE VECT        # trace interpolation: VECTor|DOT (DOT draws faster)
 ```
 `TRIG:STAT?` is the quickest way to confirm the scope has a stable trigger before reading measurements.
 
@@ -625,6 +627,8 @@ SEAR OFF                  # disable search
 ```
 HOR:POS?                  # trigger horizontal position (%) -> 50.00 (center)
 HOR:POS 30                # set to 30%
+TIM:DEL 1.00E-05          # main timebase delay (trigger-to-reference time), range [-5000div, 5div]×TDIV
+TIM:REF DELay             # zoom reference strategy: DELay (expand around center) | POSition (fixed grid pos)
 ```
 
 ## Save / Recall Setup
@@ -634,6 +638,11 @@ RCL 1                     # recall setup from slot 1
 SAVE:WAV C1               # save C1 waveform data to file (on scope storage)
 SAVE:IMAG                 # save screen image
 SAVE:SET                  # save current setup to file
+REC:FDEF                  # recall factory defaults
+REC:SET INT,1             # recall internal setup slot 1-10
+REC:SET EXT,"U-disk0/SIGLENT/default.xml"   # recall .xml setup from U-disk0/local/net_storage
+REC:REF REFD,"U-disk0/SIGLENT/math.ref"     # recall .ref waveform file into REFA-REFD
+REC:SER                   # delete ALL user files inside scope (refs, setups, masks, defaults) - destructive
 ```
 
 ## Screenshot via SCPI (Preferred Over Browser Automation)
