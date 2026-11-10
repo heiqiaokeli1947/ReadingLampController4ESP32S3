@@ -948,6 +948,29 @@ TRIG:LIN:STAN 1           # LIN standard for checksum: 0=Rev1.3, 1=Rev2.x
 
 Note: `DEC:BUS1:PROT?`/`RXSOUR?` may return empty even though set commands work (observed on this firmware). `DEC:BUS1:RES?` is the reliable way to pull decoded data.
 
+## Digital Channels (DIGital subsystem, manual pp.174–187)
+
+**NOT supported on SDS2204X HD** — this unit has no MSO/digital-channel hardware (unlike SDS2000X Plus + SLA1016 or SDS6000). Commands below are documented for completeness; expect empty or error responses on this scope.
+
+```
+DIG:ACT D0                # select active digital channel D0..D15
+DIG:D0 ON                 # enable/disable digital channel D<n>
+DIG:THR1 TTL              # threshold group 1 = D0-D7, group 2 = D8-D15:
+                          #   TTL|CMOS|LVCMOS33|LVCMOS25|CUSTom,[-10..10 V]
+DIG:SKEW 1.00E-07         # deskew ±100 ns
+DIG:HEIG 6.00E+00         # digital waveform area height [4, 8] div
+DIG:POS 4.00E+00          # vertical position (div from top)
+DIG:LAB15 "IIC_DATA"      # per-channel label (max 7 chars)
+DIG:SRAT?                 # digital sample rate (query only) -> e.g. 1.25E+09
+DIG:POIN?                 # digital sample points (query only)
+
+# Digital bus (2 buses, each up to 16 bits):
+DIG:BUS1:DISP ON          # show bus on screen
+DIG:BUS1:MAP D0,D3,D7,D15 # bus bit composition (LSB order); bit width = param count
+DIG:BUS1:DEF              # reset bus map to D0..D15
+DIG:BUS1:FORM HEX         # display format: BINary|DECimal|HEX|ASCii
+```
+
 ## DVM (Digital Voltmeter)
 ```
 DVM ON                    # enable DVM (query: DVM?)
