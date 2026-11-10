@@ -10,6 +10,7 @@ import domain.FanFSM as fanFSM
 import domain.PumpFSM as pumpFSM
 import domain.DBUtils as db
 import domain.ntpSync as ntpSync
+import domain.matrix_anim as matrix_anim
 import _thread
 import gc
 import micropython as mp
@@ -58,6 +59,12 @@ defaultSystemConfig = {
     "delayedOffTime": 60,
     # 视疲劳提醒间隔（分钟，0=关闭）
     "eyeRemindInterval": 0,
+    # 矩阵显示设置（持久化）
+    "matrixAnim": "rainbow",
+    "matrixText": "",
+    "matrixColor": "#00ff78",
+    "matrixBrightness": 1.0,
+    "matrixSpeed": 20,
     "ver": "1.0"
 }
 
@@ -105,6 +112,11 @@ log("init FSM...")
 lightFSM = lightControlFSM.FSM(bspInstance, systemConfig)
 fanFSMInstance = fanFSM.FSM(bspInstance, systemConfig)
 pumpFSMInstance = pumpFSM.FSM(bspInstance, systemConfig)
+
+# ===== 矩阵动画（run() 由主循环驱动，与 FSM 同模式）=====
+matrixAnim = matrix_anim.MatrixAnim(bspInstance.matrix, fps=24, brightness=systemConfig.get("matrixBrightness", 1.0))
+matrixAnim.play(systemConfig.get("matrixAnim", "rainbow"))
+log("matrix animations: {}".format(matrixAnim.list()))
 
 
 # ===== 主循环计时变量 =====
@@ -407,6 +419,77 @@ def handler(request):
     return ujson.dumps({"errCode": "-1", "msg": "unsupported operation."})
 
 
+@app.get('/matrix')
+def handler(request):
+    """矩阵动画控制：mode=list 列出动画，mode=set&name=xxx 切换动画。"""
+    global whenGotoConfigMode
+    whenGotoConfigMode = utime.time()
+    if "devicepwd" not in request.args or request.args["devicepwd"] != systemConfig["devicepwd"]:
+        return ujson.dumps({"errCode": "-1", "msg": "invalid device password."})
+    mode = request.args.get("mode", "")
+    if mode == "list":
+        return ujson.dumps({"errCode": "0", "animations": matrixAnim.list()})
+    elif mode == "set":
+        name = request.args.get("name", "")
+        if name in matrixAnim.list():
+            # 亮度：支持从请求参数传入并持久化
+            brightness = systemConfig.get("matrixBrightness", 1.0)
+            try:
+                brightness = max(0.01, min(1.0, float(request.args.get("brightness", str(brightness)))))
+            except ValueError:
+                pass
+            systemConfig["matrixBrightness"] = brightness
+            matrixAnim.matrix.brightness = brightness
+            matrixAnim.play(name)
+            systemConfig["matrixAnim"] = name
+            db.save({"systemConfig": ujson.dumps(systemConfig)})
+            return ujson.dumps({"errCode": "0", "msg": "playing: {}".format(name)})
+        return ujson.dumps({"errCode": "-1", "msg": "unknown animation: {}".format(name)})
+    elif mode == "scroll":
+        text = request.args.get("text", "")
+        if text:
+            # 颜色：支持 #RRGGBB 或 r,g,b
+            color = (0, 255, 120)
+            c = request.args.get("color", "")
+            if c:
+                if c.startswith("#") and len(c) == 7:
+                    try:
+                        color = (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16))
+                    except ValueError:
+                        pass
+                elif "," in c:
+                    parts = c.split(",")
+                    if len(parts) == 3:
+                        try:
+                            color = (int(parts[0]), int(parts[1]), int(parts[2]))
+                        except ValueError:
+                            pass
+            brightness = 1.0
+            try:
+                brightness = max(0.01, min(1.0, float(request.args.get("brightness", "1"))))
+            except ValueError:
+                pass
+            speed = 20
+            try:
+                speed = max(1.0, min(100.0, float(request.args.get("speed", "20"))))
+            except ValueError:
+                pass
+            matrixAnim.scroll_text(text, color=color, brightness=brightness, speed=speed)
+            # 持久化到 systemConfig
+            color_hex = "#{:02x}{:02x}{:02x}".format(color[0], color[1], color[2])
+            systemConfig["matrixText"] = text
+            systemConfig["matrixColor"] = color_hex
+            systemConfig["matrixBrightness"] = brightness
+            systemConfig["matrixSpeed"] = speed
+            db.save({"systemConfig": ujson.dumps(systemConfig)})
+            return ujson.dumps({"errCode": "0", "msg": "scrolling: {}".format(text)})
+        return ujson.dumps({"errCode": "-1", "msg": "text is required."})
+    elif mode == "off":
+        matrixAnim.stop()
+        return ujson.dumps({"errCode": "0", "msg": "matrix off"})
+    return ujson.dumps({"errCode": "-1", "msg": "unsupported operation."})
+
+
 @app.get('/scanap')
 def handler(request):
     global whenGotoConfigMode
@@ -618,6 +701,9 @@ while True:
         lightFSM.run()
     except Exception as e:
         log("[ERROR] LightFSM.run failed:{}".format(e))
+
+    # 矩阵动画（内部按帧间隔节流）
+    matrixAnim.run()
 
     # 风扇 FSM（1Hz）
     if utime.ticks_diff(now, lastFanTick) >= FSM_SLOW_INTERVAL_MS:

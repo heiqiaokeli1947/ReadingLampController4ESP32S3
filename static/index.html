@@ -228,6 +228,55 @@
                 <button class="btn btn-success" id="btnSavePWM">保存 PWM</button>
             </div>
 
+            <div class="card">
+                <h2>矩阵显示设置</h2>
+                <div class="form-group">
+                    <label>动画效果（与滚动文字二选一）</label>
+                    <div class="grid-4" id="matrixAnimBtns">
+                        <button class="btn" data-name="rainbow">🌈 彩虹</button>
+                        <button class="btn" data-name="breathing">💗 呼吸</button>
+                        <button class="btn" data-name="bounce">⚽ 弹球</button>
+                        <button class="btn" data-name="plasma">🌌 等离子</button>
+                        <button class="btn" data-name="life">🧬 生命游戏</button>
+                        <button class="btn" data-name="rain">🌧️ 流星</button>
+                        <button class="btn" data-name="matrix">💚 数字雨</button>
+                        <button class="btn" data-name="wave">🌊 涟漪</button>
+                    </div>
+                </div>
+                <div class="slider-group">
+                    <label><span>亮度</span><span><span id="matrixBrightVal">100</span>%</span></label>
+                    <input type="range" id="matrixBright" min="1" max="100" value="100">
+                    <div style="font-size:0.75rem;color:#999;margin-top:4px">动画与滚动文字均受此亮度控制</div>
+                </div>
+                <div style="border-top:1px solid #eee;padding-top:12px;margin-top:12px">
+                    <label style="font-size:0.85rem;color:#555;display:block;margin-bottom:6px">滚动文字（5x8 字符，支持大小写、数字、标点）</label>
+                    <div class="form-group" style="margin-bottom:8px">
+                        <label>文字颜色</label>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                            <button type="button" class="matrix-color-btn" data-color="#00ff78" style="background:#00ff78;width:32px;height:32px;border-radius:6px;border:2px solid #333;cursor:pointer"></button>
+                            <button type="button" class="matrix-color-btn" data-color="#ff0000" style="background:#ff0000;width:32px;height:32px;border-radius:6px;border:2px solid #ccc;cursor:pointer"></button>
+                            <button type="button" class="matrix-color-btn" data-color="#00ff00" style="background:#00ff00;width:32px;height:32px;border-radius:6px;border:2px solid #ccc;cursor:pointer"></button>
+                            <button type="button" class="matrix-color-btn" data-color="#0000ff" style="background:#0000ff;width:32px;height:32px;border-radius:6px;border:2px solid #ccc;cursor:pointer"></button>
+                            <button type="button" class="matrix-color-btn" data-color="#ffff00" style="background:#ffff00;width:32px;height:32px;border-radius:6px;border:2px solid #ccc;cursor:pointer"></button>
+                            <button type="button" class="matrix-color-btn" data-color="#ff00ff" style="background:#ff00ff;width:32px;height:32px;border-radius:6px;border:2px solid #ccc;cursor:pointer"></button>
+                            <button type="button" class="matrix-color-btn" data-color="#00ffff" style="background:#00ffff;width:32px;height:32px;border-radius:6px;border:2px solid #ccc;cursor:pointer"></button>
+                            <button type="button" class="matrix-color-btn" data-color="#ffffff" style="background:#ffffff;width:32px;height:32px;border-radius:6px;border:2px solid #ccc;cursor:pointer"></button>
+                            <input type="color" id="matrixCustomColor" value="#00ff78" style="width:32px;height:32px;border:none;cursor:pointer">
+                            <span id="matrixColorLabel" style="font-size:0.85rem;color:#555">#00ff78</span>
+                        </div>
+                    </div>
+                    <div class="slider-group" style="margin-bottom:8px">
+                        <label><span>滚动速度</span><span><span id="matrixSpeedVal">20</span> 像素/秒</span></label>
+                        <input type="range" id="matrixSpeed" min="1" max="100" value="20">
+                    </div>
+                    <div style="display:flex;gap:8px">
+                        <input type="text" id="matrixText" placeholder="输入文字后按回车或点击播放" maxlength="40" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px">
+                        <button class="btn btn-primary" id="btnMatrixScroll">播放</button>
+                        <button class="btn" id="btnMatrixOff" style="background:#95a5a6;color:#fff">关闭</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="grid-2">
                 <div class="card">
                     <h2>网络设置</h2>
@@ -654,9 +703,89 @@
         // 首次加载后填充设置表单
         $.get('/status', { mode: 'get', devicepwd: pwd() }).done(function(resp) {
             let d; try { d = JSON.parse(resp); } catch(e) { return; }
-            if (d.errCode === '0') { currentData = d; syncSettingsForm(d, true); updateMonitor(d); pushChart(d); }
+            if (d.errCode === '0') { currentData = d; syncSettingsForm(d, true); updateMonitor(d); pushChart(d); loadMatrixSettings(d); }
         });
         setInterval(refresh, 2000);
+    });
+
+    // 矩阵控制
+    const matrixSettings = { color: '#00ff78', brightness: 1.0, speed: 20, anim: 'rainbow' };
+
+    function loadMatrixSettings(d) {
+        if (d.matrixColor) matrixSettings.color = d.matrixColor;
+        if (d.matrixBrightness !== undefined) matrixSettings.brightness = parseFloat(d.matrixBrightness);
+        if (d.matrixSpeed !== undefined) matrixSettings.speed = parseInt(d.matrixSpeed);
+        if (d.matrixAnim) matrixSettings.anim = d.matrixAnim;
+        // 回填 UI
+        $('#matrixText').val(d.matrixText || '');
+        const brightPct = Math.round(matrixSettings.brightness * 100);
+        $('#matrixBright').val(brightPct);
+        $('#matrixBrightVal').text(brightPct);
+        $('#matrixSpeed').val(matrixSettings.speed);
+        $('#matrixSpeedVal').text(matrixSettings.speed);
+        updateMatrixColorUI();
+        updateMatrixAnimUI();
+    }
+
+    function updateMatrixAnimUI() {
+        $('#matrixAnimBtns button').each(function() {
+            const on = $(this).data('name') === matrixSettings.anim;
+            $(this).css('background', on ? '#3498db' : '');
+            $(this).css('color', on ? '#fff' : '');
+        });
+    }
+
+    function updateMatrixColorUI() {
+        $('.matrix-color-btn').each(function() {
+            const on = $(this).data('color').toUpperCase() === matrixSettings.color.toUpperCase();
+            $(this).css('border-color', on ? '#333' : '#ccc');
+            $(this).css('border-width', on ? '3px' : '2px');
+        });
+        $('#matrixCustomColor').val(matrixSettings.color);
+        $('#matrixColorLabel').text(matrixSettings.color);
+    }
+
+    $(document).on('click', '.matrix-color-btn', function() {
+        matrixSettings.color = $(this).data('color');
+        updateMatrixColorUI();
+    });
+    $(document).on('input', '#matrixCustomColor', function() {
+        matrixSettings.color = $(this).val();
+        updateMatrixColorUI();
+    });
+
+    $(document).on('input', '#matrixBright', function() {
+        matrixSettings.brightness = parseInt($(this).val()) / 100;
+        $('#matrixBrightVal').text($(this).val());
+    });
+    $(document).on('input', '#matrixSpeed', function() {
+        matrixSettings.speed = parseInt($(this).val());
+        $('#matrixSpeedVal').text($(this).val());
+    });
+
+    $(document).on('click', '#matrixAnimBtns button', function() {
+        const name = $(this).data('name');
+        matrixSettings.anim = name;
+        updateMatrixAnimUI();
+        $.get('/matrix', { mode: 'set', devicepwd: pwd(), name: name, brightness: matrixSettings.brightness });
+    });
+    $(document).on('click', '#btnMatrixScroll', function() {
+        const text = $('#matrixText').val();
+        if (!text) { $('#matrixText').focus(); return; }
+        matrixSettings.anim = null;
+        updateMatrixAnimUI();
+        $.get('/matrix', {
+            mode: 'scroll', devicepwd: pwd(), text: text,
+            color: matrixSettings.color,
+            brightness: matrixSettings.brightness,
+            speed: matrixSettings.speed
+        });
+    });
+    $(document).on('click', '#btnMatrixOff', function() {
+        $.get('/matrix', { mode: 'off', devicepwd: pwd() });
+    });
+    $(document).on('keydown', '#matrixText', function(e) {
+        if (e.key === 'Enter') $('#btnMatrixScroll').click();
     });
     </script>
 </body>

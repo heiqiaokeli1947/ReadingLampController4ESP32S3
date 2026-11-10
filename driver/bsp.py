@@ -13,6 +13,7 @@ import driver.lm75a as lm75a
 # import driver.bh1750 as bh1750
 # import driver.pms5003 as pms5003
 from lib.rotary.rotary_irq_esp import RotaryIRQ
+from driver.ws2818_matrix import WS2818Matrix
 
 # 传感器健康管理参数
 _SENSOR_STALE_MS = const(10000)        # 超过 10s 无有效值 → 数据判为老化，置无效值
@@ -41,6 +42,7 @@ class BSP:
     PIN_ROTARY_DT = 39     # 编码器 DT (原 GPIO17，S3 右11=PSRAM→就近右9)
     PIN_ROTARY_KEY = 1     # 编码器按键 (原 GPIO23，S3 无 23→就近右4)
     PIN_WS2812 = 48        # 状态指示灯 WS2812 (原 GPIO2 板载 LED)
+    PIN_WS2818_MATRIX = 47  # 8x8 WS2818 矩阵数据脚 (右17，紧邻 GPIO48 状态灯)
 
     # 单例
     __instance = None
@@ -73,6 +75,9 @@ class BSP:
 
         # WS2812 状态灯
         self.__LEDArray = neopixel.NeoPixel(Pin(self.PIN_WS2812), 1)
+
+        # WS2818 8x8 矩阵
+        self.matrix = WS2818Matrix(self.PIN_WS2818_MATRIX, 8, 8, serpentine=False, rotation=90)
 
         # LED 电源使能
         self.__LED_EN_A = Pin(self.PIN_LED_EN_A, Pin.OUT, value=0)

@@ -213,6 +213,7 @@ ReadingLampController4ESP32S3/
 | GPIO 输入 | 编码器 DT | GPIO39 | PULL_UP | 旋转编码器 B 相（IRQ 双边沿） |
 | GPIO 输入 | 编码器 KEY | GPIO1 | PULL_UP | 编码器按键，低有效 |
 | 输出 | WS2812 LED | GPIO48 | — | RGB 状态指示（NeoPixel，RMT） |
+| 输出 | WS2818 矩阵 | GPIO47 | — | 8×8 RGB 矩阵（单线 800kHz，NeoPixel） |
 
 **I²C 设备地址：** LM75A(散热器出水口)=0x4A，LM75A(灯板)=0x4F。
 
