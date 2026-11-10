@@ -946,6 +946,52 @@ TRIG:LIN:ERR:DLEN 1       # ...data-length error (0|1)
 TRIG:LIN:STAN 1           # LIN standard for checksum: 0=Rev1.3, 1=Rev2.x
 ```
 
+**CAN FD trigger** (manual pp.637–647) — dual-bit-rate CAN FD frames:
+```
+TRIG:TYPE CANFD
+TRIG:CANF:SOUR C1         # source channel
+TRIG:CANF:THR 1.65        # threshold V
+TRIG:CANF:FTYP CANF       # frame type: BOTH|CAN|CANFd
+TRIG:CANF:BAUDN 500kbps   # nominal (arbitration) rate: 10k/25k/50k/100k/250k/1Mbps or CUSTom,[10000-1000000]
+TRIG:CANF:BAUDD 2Mbps     # data rate: 500k/1M/2M/5M/8M/10Mbps or CUSTom,[100000-10000000]
+TRIG:CANF:COND ID         # STARt|REMote|ID|ID_AND_DATA|ERRor
+TRIG:CANF:IDL 11BITS      # 11BITS|29BITS
+TRIG:CANF:ID 256          # decimal; max value = don't care
+TRIG:CANF:DATA 256        # [0,256]; 256 = don't care
+TRIG:CANF:DAT2 256        # second data byte; 256 = don't care
+```
+
+**IIS (I2S audio) trigger** (manual pp.648–663) — trigger on audio bus data/conditions:
+```
+TRIG:TYPE IIS
+TRIG:IIS:AVAR IIS         # audio variant: IIS|LJ|RJ (left-justified|right-justified)
+TRIG:IIS:BCLKS C1         # BCLK source; BCLKT = threshold
+TRIG:IIS:WSS C2           # WS (word select) source; WSTH = threshold
+TRIG:IIS:DS C3            # data source; DTHR = threshold
+TRIG:IIS:LATC RIS         # BCLK latch edge: RISing|FALLing
+TRIG:IIS:LCH LOW          # WS level meaning "left channel": LOW|HIGH
+TRIG:IIS:BIT MSB          # bit order: LSB|MSB
+TRIG:IIS:CHAN LEFT        # trigger channel: LEFT|RIGHT
+TRIG:IIS:COND DATA        # DATA|MUTE|CLIP|GLITch|RISing|FALLing
+TRIG:IIS:DLEN 8           # data bits (range depends on channel-bit width and start bit)
+TRIG:IIS:COMP EQU         # data compare (COND=DATA): EQUal|GREaterthan|LESSthan
+TRIG:IIS:VAL 86           # compare value, decimal; don't care = 256 @ 8-bit
+```
+MUTE/CLIP/GLITch conditions catch audio dropouts, clipping and glitches — no VAL needed.
+
+**FlexRay trigger** (manual pp.628–636) — automotive FlexRay bus:
+```
+TRIG:TYPE FLEXRAY
+TRIG:FLEX:SOUR C1         # source channel
+TRIG:FLEX:THR 1.65        # threshold V
+TRIG:FLEX:BAUD 10Mbps     # 2500kbps|5Mbps|10Mbps or CUSTom,[1000000-20000000]
+TRIG:FLEX:COND FRAMe      # TSS (start sequence)|FRAMe|SYMBol|ERRor
+TRIG:FLEX:FRAM:ID 1793    # frame ID [0,2048]; 2048 = don't care
+TRIG:FLEX:FRAM:CYCL 2     # cycle count [0,63]
+TRIG:FLEX:FRAM:COMP EQU   # cycle compare: ANY|EQUal|GREaterthan|LESSthan
+TRIG:FLEX:FRAM:REP 8      # cycle repetition (COMP=EQUal): 1|2|4|8|16|32|64
+```
+
 Note: `DEC:BUS1:PROT?`/`RXSOUR?` may return empty even though set commands work (observed on this firmware). `DEC:BUS1:RES?` is the reliable way to pull decoded data.
 
 ## Digital Channels (DIGital subsystem, manual pp.174–187)
