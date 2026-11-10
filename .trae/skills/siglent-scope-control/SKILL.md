@@ -1233,7 +1233,8 @@ documented — use `*STB?`/`SYST:ERR?` for status.
 4. Compare measured duty against expected:
    - `calPct = calibratePower(brightness, TABLE)` (lookup-table interpolation in `domain/LightControllFSM.py`)
    - `actualDuty ≈ minDuty + (maxDuty - minDuty) * calPct / 100`
-   - minDuty: white=6, yellow=5, fan=15, pump=15; maxDuty=100 for all
+   - minDuty: white=6, yellow=5, fan=10, pump=15; maxDuty=100 for all (verified live via `/status` on 2026-11-10)
+   - `main.py` defaults are 15% for all four channels, so ALWAYS read `*PwmMin/*PwmMax` from `/status` instead of hard-coding
 
 ## Complete 25 kHz PWM Measurement Workflow
 
