@@ -1605,7 +1605,13 @@ python scripts\scope_lab.py single    # CH1 config -> SINGLE -> RUN -> poll Stop
 python scripts\scope_lab.py pwm       # DUT /status vs measured FREQ/DUTY on C1..C4 + pwm.png
 python scripts\scope_lab.py params    # PAVA type matrix -> WORKS / EMPTY lists
 python scripts\scope_lab.py runall    # ordered suite, appends to scope_lab\runall.log
+python scripts\scope_wait.py          # poll 5024 until the scope is back, then run idn+single+pwm
 ```
+
+`scripts/scope_wait.py` is the unattended recovery driver: it probes the SCPI port every 10 s
+(`--interval`), gives up after `--timeout` seconds if set, and on success runs `--suite`
+(default `idn,single,pwm`). Use it after a physical power-cycle so the whole closed-loop
+verification runs without further manual steps.
 
 `scripts/scope_lab.py` (shipped with this skill) implements the raw-socket client, the PNG screenshot
 decoder and every experiment named here; `scripts/vnc_probe.py` performs the raw RFB handshake check.
