@@ -337,7 +337,7 @@ FORM:DATA CUSTom,7    # set query response precision: SINGle(7)|DOUBle(14)|CUSTo
 | 1.0V | ~1.10V |
 | 2.0V | ~2.20V |
 
-For a 3.3V logic signal with VDIV=1V, set trigger to ~0.7V (midpoint of typical 0–1.4V swing after probe attenuation). If you need a higher trigger level, increase VDIV first.
+For a 3.3V logic signal, use **VDIV=2V** (4 divisions × 2V = 8V full scale, so 0–3.3V fits cleanly on all 4 channels simultaneously). Set trigger to ~1.65V (midpoint of 0–3.3V swing); at VDIV=2V the max trigger level is ~2.2V, so 1.65V is within range.
 
 ### Single Trigger & Run Control
 Trigger states (`TRIG:STAT?`): `Arm | Ready | Auto | Trig'd | Stop | Roll`.
@@ -1337,9 +1337,9 @@ End-to-end sequence to configure the scope for a 25 kHz PWM signal and read meas
 C1:OFST 0
 C2:OFST 0
 
-# 2. Set vertical scale (1 V/div fits typical 1.4V swing with margin)
-C1:VDIV 1
-C2:VDIV 1
+# 2. Set vertical scale (2 V/div fits 0–3.3V logic on all 4 channels at once)
+C1:VDIV 2
+C2:VDIV 2
 
 # 3. Set timebase (10 us/div → 40 us period fits in ~4 divisions)
 TDIV 1E-5
@@ -1348,7 +1348,7 @@ TDIV 1E-5
 TRIG:EDGE:SOUR CHAN1
 TRIG:EDGE:SLOP POS
 TRIG:MODE AUTO
-TRIG:EDGE:LEV 0.7         # ~0.7V midpoint; max is ~1.1V at VDIV=1V (clamped!)
+TRIG:EDGE:LEV 1.65        # ~1.65V midpoint of 0–3.3V; max is ~2.2V at VDIV=2V (clamped!)
 
 # 5. Confirm stable trigger
 TRIG:STAT?                # -> Trig'd
