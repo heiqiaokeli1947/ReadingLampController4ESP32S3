@@ -442,6 +442,14 @@ WAV:DATA?             # raw sample data - binary block "#N<Ndigits>" + data + tr
 
 - Data is large (~100 KB+). Save to a file; do not print to console. Read raw bytes, not ReadLine().
 
+**Sequence mode frame transfer** (manual p679): when `:ACQuire:SEQuence ON`, select which segment frame `WAV:DATA?` returns:
+```
+WAV:SEQ 3,0       # transfer frame index 3 only
+WAV:SEQ 0,1       # transfer ALL frames starting at index 1 (slice when total exceeds memory)
+WAV:SEQ?          # -> <frame>,<start>. Defaults: seq on -> 1; seq+history -> current frame; else 4294967295
+```
+Frame counts for slicing come from `WAV:PRE?` WAVEDESC fields read_frames (0x90-0x93) and sum_frames (0x94-0x97).
+
 ## Display / Status / Acquire
 ```
 DISP:GRID?            # grid mode -> FULL (also HALF, OFF)
