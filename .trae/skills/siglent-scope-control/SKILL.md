@@ -1550,12 +1550,14 @@ Nothing in the SCPI flow above caused the wedge — it appeared during a long id
 
 Post-recovery validation order (each step must pass before the next):
 
-`powershell
-python C:\Users\ADMINI~1\AppData\Local\Temp\scope_lab.py idn       # *IDN?, TRIG:STAT?, ACQ:SRAT?
-python C:\Users\ADMINI~1\AppData\Local\Temp\scope_lab.py single    # CH1 config -> SINGLE -> RUN -> poll Stop -> PRIN? PNG
-# Read C:\Users\ADMINI~1\AppData\Local\Temp\scope_lab\single.png and confirm a 25 kHz PWM square wave is on screen
-python C:\Users\ADMINI~1\AppData\Local\Temp\scope_lab.py runall    # ordered suite, appends to scope_lab\runall.log
-`
+```powershell
+python scripts\scope_lab.py idn       # *IDN?, TRIG:STAT?, ACQ:SRAT?
+python scripts\scope_lab.py single    # CH1 config -> SINGLE -> RUN -> poll Stop -> PRIN? PNG
+# Read $env:TEMP\scope_lab\single.png and confirm a 25 kHz PWM square wave is on screen
+python scripts\scope_lab.py runall    # ordered suite, appends to scope_lab\runall.log
+```
 
-unall executes idn -> single -> display -> cursor -> dvm -> acquire -> meas -> fft -> history -> ref -> mask.
-Individual steps can be re-run: python C:\Users\ADMINI~1\AppData\Local\Temp\scope_lab.py runall fft.
+`scripts/scope_lab.py` (shipped with this skill) implements the raw-socket client, the PNG screenshot
+decoder and every experiment named here; `scripts/vnc_probe.py` performs the raw RFB handshake check.
+`runall` executes idn -> single -> display -> cursor -> dvm -> acquire -> meas -> fft -> history -> ref -> mask.
+Individual steps can be re-run: `python scripts\scope_lab.py runall fft`.

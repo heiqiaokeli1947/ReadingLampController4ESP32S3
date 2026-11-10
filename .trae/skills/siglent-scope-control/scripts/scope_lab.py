@@ -1,0 +1,316 @@
+# scope_lab.py — Siglent SDS2204X HD experiment driver (raw socket, port 5024)
+# Usage: python scope_lab.py <experiment> [args]
+# Experiments: idn, single, wgen, meas, trig <type>, decode_uart, mtest, history, acquire, ref, vxi11_idn
+import socket, sys, time, os
+
+SCOPE = "192.168.30.105"
+PORT = 5024
+OUT = os.path.join(os.environ.get("TEMP", "."), "scope_lab")
+os.makedirs(OUT, exist_ok=True)
+
+class Scope:
+    def __init__(self, host=SCOPE, port=PORT, timeout=4.0):
+        self.s = socket.create_connection((host, port), timeout=timeout)
+        self.s.settimeout(timeout)
+        self._read_to_prompt(1.5)
+
+    def _read_to_prompt(self, timeout=None):
+        old = self.s.gettimeout()
+        if timeout: self.s.settimeout(timeout)
+        data = b""
+        try:
+            while True:
+                chunk = self.s.recv(65536)
+                if not chunk: break
+                data += chunk
+                if data.rstrip(b"\x00\r\n ").endswith(b">>"): break
+        except socket.timeout:
+            pass
+        finally:
+            self.s.settimeout(old)
+        return data
+
+    def cmd(self, c, wait=0.6):
+        self.s.sendall(c.encode() + b"\r\n")
+        time.sleep(wait)
+        raw = self._read_to_prompt()
+        txt = raw.decode("ascii", "replace").lstrip("\x00")
+        lines = [l.strip() for l in txt.splitlines()
+                 if l.strip() and l.strip() != ">>" and l.strip() != c]
+        return " | ".join(lines)
+
+    def screenshot(self, path, fmt="PNG"):
+        self.s.sendall(f"PRIN? {fmt}\r\n".encode())
+        time.sleep(1.0)
+        data = b""
+        self.s.settimeout(6.0)
+        last = time.time()
+        try:
+            while time.time() - last < 2.5:
+                try:
+                    chunk = self.s.recv(262144)
+                    if not chunk: break
+                    data += chunk
+                    last = time.time()
+                except socket.timeout:
+                    break
+        finally:
+            self.s.settimeout(4.0)
+        # strip leading NUL and trailing prompt
+        data = data.lstrip(b"\x00")
+        idx = data.rfind(b">>")
+        if idx != -1:
+            data = data[:idx].rstrip(b"\r\n")
+        with open(path, "wb") as f:
+            f.write(data)
+        ok = data[1:4] == b"PNG" if fmt == "PNG" else data[:2] == b"BM"
+        return len(data), ok
+
+    def wait_stop(self, tries=25, delay=0.4):
+        for i in range(tries):
+            time.sleep(delay)
+            st = self.cmd("TRIG:STAT?", wait=0.3)
+            print(f"  TRIG:STAT? [{i}] -> {st}")
+            if "Stop" in st:
+                return True
+        return False
+
+    def close(self):
+        try: self.s.close()
+        except Exception: pass
+
+def exp_idn(sc):
+    print("*IDN? ->", sc.cmd("*IDN?"))
+    print("TRIG:STAT? ->", sc.cmd("TRIG:STAT?"))
+    print("ACQ:SRAT? ->", sc.cmd("ACQ:SRAT?"))
+
+def exp_single(sc):
+    """Single-trigger closed loop on CH1 (the task's core requirement)."""
+    print("C1 setup:", sc.cmd("C1:TURN ON"), sc.cmd(":CHAN1:VIS ON"),
+          sc.cmd("C1:VDIV 0.5"), sc.cmd("C1:OFST 0"), sc.cmd("TDIV 1E-5"))
+    print("trig cfg:", sc.cmd("TRIG:TYPE EDGE"), sc.cmd("TRIG:EDGE:SOUR CHAN1"),
+          sc.cmd("TRIG:EDGE:SLOP POS"), sc.cmd("TRIG:EDGE:LEV 0.3"))
+    print("LEV? ->", sc.cmd("TRIG:EDGE:LEV?"))
+    sc.cmd("TRIG:MODE SINGLE"); sc.cmd("TRIG:RUN")
+    ok = sc.wait_stop()
+    print("captured:", ok)
+    sc.cmd("C1:MEAS FREQ,ON"); print("FREQ ->", sc.cmd("C1:PAVA? FREQ"))
+    sc.cmd("C1:MEAS DUTY,ON"); print("DUTY ->", sc.cmd("C1:PAVA? DUTY"))
+    sc.cmd("C1:MEAS PKPK,ON"); print("PKPK ->", sc.cmd("C1:PAVA? PKPK"))
+    n, hdr = sc.screenshot(os.path.join(OUT, "single.png"))
+    print(f"screenshot single.png: {n} bytes, header_ok={hdr}")
+    sc.cmd("TRIG:MODE AUTO")
+
+def exp_wgen(sc):
+    """Built-in waveform generator -> loop back or just verify commands."""
+    print("WGEN OUTP ON:", sc.cmd("WGEN:OUTP ON"))
+    print("WGEN PULSE 25k:", sc.cmd("WGEN:BSWV WVTP,PULSE"),
+          sc.cmd("WGEN:BSWV FRQ,25000"), sc.cmd("WGEN:BSWV AMP,3.3"),
+          sc.cmd("WGEN:BSWV OFST,1.65"), sc.cmd("WGEN:BSWV DUTY,50"))
+    print("WGEN? ->", sc.cmd("WGEN:BSWV?"))
+
+def exp_meas(sc):
+    """MEAS:ADV vs MEAS:SIMP comparison."""
+    print("MODE ADV:", sc.cmd("MEAS:MODE ADV"))
+    print("ADV P1 FREQ:", sc.cmd("MEAS:ADV:P1:TYPE FREQ"), sc.cmd("MEAS:ADV:P1:SOURce1 C1"))
+    print("P1 VAL ->", sc.cmd("MEAS:ADV:P1:VALue?"))
+    print("ADV stats:", sc.cmd("MEAS:ADV:STAT ON"), sc.cmd("MEAS:ADV:P1:STATistics?"))
+    print("SIMP:", sc.cmd("MEAS:SIMP:ITEM PWID,C1"), sc.cmd("MEAS:SIMP:VALue?"))
+
+def exp_trig(sc, t):
+    """Exercise one advanced trigger type with project-relevant params."""
+    t = t.upper()
+    cmds = {
+        "PULSE": ["TRIG:TYPE PULSE", "TRIG:PULS:SOUR C1", "TRIG:PULS:POL POS",
+                  "TRIG:PULS:LEV 0.7", "TRIG:PULS:LIM LESS",
+                  "TRIG:PULS:TLOW 1.0E-6", "TRIG:PULS:COUP DC", "TRIG:PULS:NREJ ON"],
+        "SLOPE": ["TRIG:TYPE SLOPE", "TRIG:SLOP:SOUR C1", "TRIG:SLOP:SLOP RIS",
+                  "TRIG:SLOP:LLEV 0.3", "TRIG:SLOP:HLEV 0.9",
+                  "TRIG:SLOP:LIM GREAT", "TRIG:SLOP:TLOW 3.0E-8"],
+        "INTERVAL": ["TRIG:TYPE INTERVAL", "TRIG:INT:SOUR C1", "TRIG:INT:SLOP RIS",
+                     "TRIG:INT:LEV 0.7", "TRIG:INT:LIM GREAT", "TRIG:INT:TLOW 4.1E-5"],
+        "DROPOUT": ["TRIG:TYPE DROPOUT", "TRIG:DROP:SOUR C1", "TRIG:DROP:SLOP RIS",
+                    "TRIG:DROP:LEV 0.7", "TRIG:DROP:TYPE EDGE", "TRIG:DROP:TIME 1.0E-4"],
+        "RUNT": ["TRIG:TYPE RUNT", "TRIG:RUNT:SOUR C1", "TRIG:RUNT:POL POS",
+                 "TRIG:RUNT:LLEV 0.3", "TRIG:RUNT:HLEV 0.9", "TRIG:RUNT:LIM GREAT"],
+        "WINDOW": ["TRIG:TYPE WINDOW", "TRIG:WIND:SOUR C1", "TRIG:WIND:TYPE ABS",
+                   "TRIG:WIND:CLEV 0.7", "TRIG:WIND:DLEV 0.4"],
+        "PATTERN": ["TRIG:TYPE PATTERN", "TRIG:PATT:INP H,L,X,X", "TRIG:PATT:LOG AND",
+                    "TRIG:PATT:LEV C1,0.7", "TRIG:PATT:LEV C2,0.7"],
+        "DELAY": ["TRIG:TYPE DELAY", "TRIG:DEL:SOUR C1", "TRIG:DEL:SOUR2 C2",
+                  "TRIG:DEL:SLOP RIS", "TRIG:DEL:SLOP2 RIS",
+                  "TRIG:DEL:LEV C1,0.7", "TRIG:DEL:LEV2 C2,0.7",
+                  "TRIG:DEL:LIM INN", "TRIG:DEL:TLOW 0", "TRIG:DEL:TUPP 2.0E-5"],
+        "QUALIFIED": ["TRIG:TYPE QUALIFIED", "TRIG:QUAL:ES C1", "TRIG:QUAL:ESL RIS",
+                      "TRIG:QUAL:ELEV 0.7", "TRIG:QUAL:QS C3", "TRIG:QUAL:QLEV 0.7",
+                      "TRIG:QUAL:TYPE STATE,HIGH"],
+        "NTHEdge": ["TRIG:TYPE NTHEdge", "TRIG:NEDG:SOUR C1", "TRIG:NEDG:SLOP RIS",
+                    "TRIG:NEDG:LEV 0.7", "TRIG:NEDG:IDLE 1.0E-4", "TRIG:NEDG:EDGE 3"],
+    }
+    if t not in cmds:
+        print("unknown type; choose from", ", ".join(cmds)); return
+    for c in cmds[t]:
+        print(f"{c} ->", sc.cmd(c))
+    q = cmds[t][1].replace(" ", "?").split(",")[0]
+    print("verify:", sc.cmd("TRIG:TYPE?"))
+    sc.cmd("TRIG:MODE SINGLE"); sc.cmd("TRIG:RUN")
+    ok = sc.wait_stop(tries=12)
+    n, hdr = sc.screenshot(os.path.join(OUT, f"trig_{t.lower()}.png"))
+    print(f"fired={ok}, screenshot {n} bytes header_ok={hdr}")
+    sc.cmd("TRIG:TYPE EDGE"); sc.cmd("TRIG:MODE AUTO")
+
+def exp_history(sc):
+    print("HISTOR ON:", sc.cmd("HISTOR ON"))
+    print("HISTOR:LIST? ->", sc.cmd("HISTOR:LIST?"))
+    print("HISTOR:FRAM 1:", sc.cmd("HISTOR:FRAM 1"))
+    print("HISTOR:TIME? ->", sc.cmd("HISTOR:TIME?"))
+    print("HISTOR OFF:", sc.cmd("HISTOR OFF"))
+
+def exp_acquire(sc):
+    for c in ["ACQ:TYPE?", "ACQ:MODE?", "ACQ:POIN?", "ACQ:SRAT?", "ACQ:MDEP?",
+              "ACQ:RES?", "ACQ:INT?", "ACQ:MMAN?", "ACQ:NUMA?"]:
+        print(f"{c} ->", sc.cmd(c))
+
+def exp_ref(sc):
+    print("save REF:", sc.cmd("SAVE:REF \"local/ref_c1\",C1"))
+    print("REFA on:", sc.cmd("REFA ON"))
+    print("REFA:DATA:SOUR? ->", sc.cmd("REFA:DATA:SOURce?"))
+
+def exp_vxi11(_sc):
+    import pyvisa
+    rm = pyvisa.ResourceManager("@py")
+    try:
+        inst = rm.open_resource(f"TCPIP0::{SCOPE}::inst0::INSTR", timeout=8000)
+        print("VXI-11 *IDN? ->", inst.query("*IDN?"))
+        inst.close()
+    except Exception as e:
+        print("VXI-11 FAIL:", type(e).__name__, e)
+
+def exp_vsock(_sc):
+    """PyVISA SOCKET resource on 5024 — live-verify prompt pollution behavior."""
+    import pyvisa
+    rm = pyvisa.ResourceManager("@py")
+    inst = rm.open_resource(f"TCPIP0::{SCOPE}::5024::SOCKET", timeout=5000)
+    inst.write_termination = "\r\n"
+    inst.read_termination = "\n"
+    try:
+        r1 = inst.query("*IDN?")
+        print("query1 raw repr:", repr(r1))
+        r2 = inst.query("TRIG:MODE?")
+        print("query2 raw repr:", repr(r2), "<- check for leading '>>' pollution")
+        r3 = inst.query("TRIG:STAT?")
+        print("query3 raw repr:", repr(r3))
+        clean = r2.lstrip("> \r\n\x00")
+        print("stripped query2:", repr(clean))
+    finally:
+        inst.close()
+
+def exp_display(sc):
+    """DISPlay subsystem (manual pp.188-199)."""
+    for c in ["DISP:GRAT 50", "DISP:GRAT?", "DISP:GRIDS LIGH", "DISP:GRIDS?",
+              "DISP:TRAN 80", "DISP:TRAN?", "DISP:BACK 100", "DISP:BACK?",
+              "DISP:INT 75,100", "DISP:INT?", "DISP:TYPE VECT", "DISP:TYPE?",
+              "DISP:COL OFF", "DISP:COL?", "DISP:AXIS ON", "DISP:AXIS?",
+              "DISP:MENU EMB", "DISP:MENU?"]:
+        print(f"{c} ->", sc.cmd(c))
+
+def exp_cursor(sc):
+    """CURSor subsystem (manual pp.55-70)."""
+    for c in ["CURS:MODE MAN,X", "CURS:MODE?", "CURS:SOUR1 C1", "CURS:SOUR1?",
+              "CURS:TAGS FIX", "CURS:TAGS?", "CURS:XREF DEL", "CURS:XREF?",
+              "CURS:YREF OFFS", "CURS:YREF?", "CURS:X1 0", "CURS:X1?",
+              "CURS:X2 2.5E-5", "CURS:X2?", "CURS:Y1 0", "CURS:Y1?", "CURS:Y2 1",
+              "CURS:Y2?", "CURS:XDEL?", "CURS:IXDEL?", "CURS:YDEL?"]:
+        print(f"{c} ->", sc.cmd(c))
+
+def exp_dvm(sc):
+    """DVM subsystem (manual pp.201-208)."""
+    for c in ["DVM ON", "DVM?", "DVM:SOUR C1", "DVM:SOUR?", "DVM:MODE DCavg",
+              "DVM:MODE?", "DVM:ARAN ON", "DVM:ARAN?", "DVM:HOLD ON", "DVM:HOLD?",
+              "DVM:CURR?", "DVM:ALAR ON", "DVM:ALAR?"]:
+        print(f"{c} ->", sc.cmd(c))
+    sc.cmd("DVM OFF")
+
+def exp_mask(sc):
+    """Mask test (manual pp.300-305) — create a mask, run briefly, read counters."""
+    for c in ["MTES:SOUR C1", "MTES:MASK:CRE 0.8,0.08", "MTES:IDIS ON",
+              "MTES ON", "MTES:OPER ON"]:
+        print(f"{c} ->", sc.cmd(c))
+    time.sleep(3)
+    print("MTES:COUN? ->", sc.cmd("MTES:COUN?"))
+    sc.cmd("MTES:OPER OFF"); sc.cmd("MTES OFF")
+    sc.screenshot(os.path.join(OUT, "mask.png"))
+
+def exp_fft(sc):
+    """Math FFT chain (manual pp.210-230)."""
+    for c in ["FUNC1 ON", "FUNC1:OPER FFT", "FUNC1:SOUR1 C1", "FUNC1:FFT:AUT NORM",
+              "FUNC:FFTD SPL", "C1:VDIV 0.5", "C1:OFST 0", "TDIV 1E-5"]:
+        print(f"{c} ->", sc.cmd(c))
+    time.sleep(1.5)
+    for c in ["FUNC1:FFT:HCEN?", "FUNC1:FFT:HSC?", "FUNC1:FFT:SPAN?",
+              "FUNC1:FFT:RLEV?", "FUNC1:FFT:UNIT DBV", "FUNC1:FFT:WIND FLAT",
+              "FUNC1:FFT:SEAR:THR -40", "FUNC1:FFT:SEAR:RES?"]:
+        print(f"{c} ->", sc.cmd(c))
+    sc.screenshot(os.path.join(OUT, "fft.png"))
+    sc.cmd("FUNC1 OFF")
+
+def exp_save(sc):
+    """SAVe/RECall setup round-trip (manual pp.306-314)."""
+    for c in ["SAVE:SETup \"local/lab_setup\"",
+              "REC:SETup \"local/lab_setup\"",
+              "SAVE:IMAGe \"local/SIGLENT/lab.png\",PNG,OFF",
+              "REC:FDEF"]:
+        print(f"{c} ->", sc.cmd(c))
+
+def exp_histplay(sc):
+    """History frames playback (manual pp.251-256)."""
+    for c in ["HISTOR ON", "HISTOR:INTER 1.00E-03", "HISTOR:INTER?",
+              "HISTOR:PLAY FORWards", "HISTOR:PLAY?",
+              "HISTOR:FRAM 2", "HISTOR:TIME?", "HISTOR:LIST?"]:
+        print(f"{c} ->", sc.cmd(c))
+    sc.cmd("HISTOR OFF")
+
+def exp_runall(sc):
+    """Ordered safe suite for post-recovery validation; logs to scope_lab/runall.log."""
+    logp = os.path.join(OUT, "runall.log")
+    step = sys.argv[2] if len(sys.argv) > 2 else "all"
+    seq = [("idn", exp_idn), ("single", exp_single), ("display", exp_display),
+           ("cursor", exp_cursor), ("dvm", exp_dvm), ("acquire", exp_acquire),
+           ("meas", exp_meas), ("fft", exp_fft), ("history", exp_histplay),
+           ("ref", exp_ref), ("mask", exp_mask)]
+    with open(logp, "a", encoding="utf-8") as lg:
+        lg.write(f"\n===== runall {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
+        for name, fn in seq:
+            if step not in ("all", name):
+                continue
+            lg.write(f"--- {name} ---\n")
+            print(f"--- {name} ---")
+            try:
+                fn(sc)
+            except Exception as e:
+                msg = f"{name} FAILED: {type(e).__name__} {e}"
+                print(msg); lg.write(msg + "\n")
+            lg.flush()
+    print("log:", logp)
+
+if __name__ == "__main__":
+    name = sys.argv[1] if len(sys.argv) > 1 else "idn"
+    if name == "vxi11":
+        exp_vxi11(None); sys.exit(0)
+    if name == "vsock":
+        exp_vsock(None); sys.exit(0)
+    sc = Scope()
+    try:
+        fn = {"idn": exp_idn, "single": exp_single, "wgen": exp_wgen,
+              "meas": exp_meas, "history": exp_histplay, "acquire": exp_acquire,
+              "ref": exp_ref, "display": exp_display, "cursor": exp_cursor,
+              "dvm": exp_dvm, "mask": exp_mask, "fft": exp_fft,
+              "save": exp_save, "runall": exp_runall}.get(name)
+        if name == "trig":
+            exp_trig(sc, sys.argv[2] if len(sys.argv) > 2 else "PULSE")
+        elif fn:
+            fn(sc)
+        else:
+            print("unknown experiment", name)
+    finally:
+        sc.close()
