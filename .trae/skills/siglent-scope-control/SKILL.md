@@ -125,6 +125,13 @@ CHAN:REF POS             # offset stays fixed to grid position when VDIV changes
 CHAN:REF?                # query -> OFFSet or POSition
 ```
 
+### Channel Labels & Deskew (manual pp.46–51)
+```
+:CHAN1:LAB ON               # show channel 1 label on screen
+:CHAN1:LAB:TEXT "WHITE"     # label text, max 20 chars, auto-uppercased
+:CHAN1:SKEW 1.52E-09        # probe deskew, range ±100 ns (align multi-channel timing)
+```
+
 ### Timebase
 ```
 TDIV 1E-5             # set horizontal scale to 10 us/div (scientific notation works)
