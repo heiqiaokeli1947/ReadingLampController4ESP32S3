@@ -960,3 +960,19 @@ The browser opens a Windows "Save As" dialog. The browser agent cannot click sys
 - ≥600 ms delay between write and read.
 - After any timeout, discard the connection and open a new one.
 - Use `\r\n` line terminators.
+
+## App Wedge Diagnosis & Recovery
+
+Observed 2026-11-10: the instrument app wedged (likely during an `ASET` + immediate disconnect); every SCPI path died while the Linux web server stayed up. Diagnosis checklist:
+
+| Probe | Healthy | Wedged app symptom |
+|-------|---------|--------------------|
+| Port 80 (web) | OPEN | OPEN |
+| Port 5024 (SCPI telnet) | OPEN | **connection refused** |
+| Port 5025 (SCPI raw) | OPEN | connection refused |
+| Port 5900 (VNC) | OPEN | OPEN but stalls: sends `RFB 003.008` banner, completes security handshake, then never sends ServerInit |
+| Port 111 (rpcbind) | OPEN | OPEN |
+| HTTP proxy `device_read_write.php` `*IDN?` | `{"cmdrslt":"Siglent..."}` | `{"cmdrslt":"Device can not  be connected","err":"Device can not  be connected"}` |
+| Ports 22 (SSH), 23 (telnet) | closed | closed |
+
+**Recovery: physical power cycle only.** `SYSTem:REBoot` exists in SCPI but cannot be delivered (proxy reports device-not-connected; no reboot endpoint on the web server). VNC input cannot be delivered either (handshake never completes). When a wedge is suspected, confirm with the table above before blaming the network, then ask the user to power-cycle and poll port 5024 until it reopens (boot takes ~1–2 min).
