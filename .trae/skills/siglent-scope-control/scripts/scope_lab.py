@@ -174,20 +174,28 @@ def exp_pwm(sc):
         chans = [(ch, f"CH{ch}", None) for ch in (1, 2, 3, 4)]
         print("probe map not configured (--channels / SCOPE_CHANNELS); assuming C1..C4 are connected")
 
-    sc.cmd("C1:VDIV 0.5"); sc.cmd("C1:OFST 0"); sc.cmd("TDIV 1E-5")
     print(f"{'CH':<3}{'signal':<8}{'duty bound':<14}{'applied':<10}{'FREQ':<22}{'DUTY'}")
+    # NOTE: the scope drops the TCP connection when channels are switched on a single socket,
+    # so each channel gets a fresh connection (one channel per connection).
     for ch, name, key in chans:
         c = f"C{ch}"
-        sc.cmd(f"{c}:TURN ON"); sc.cmd(f":CHAN{ch}:VIS ON")
-        sc.cmd(f"{c}:VDIV 0.5"); sc.cmd(f"{c}:OFST 0")
-        sc.cmd(f"{c}:MEAS FREQ,ON"); sc.cmd(f"{c}:MEAS DUTY,ON")
-        freq = sc.cmd(f"{c}:PAVA? FREQ").split(",")[-1]
-        duty = sc.cmd(f"{c}:PAVA? DUTY").split(",")[-1]
-        lo, hi = st.get(f"{name}PwmMin"), st.get(f"{name}PwmMax")
-        bound = f"{lo}~{hi}%" if lo is not None and hi is not None else "-"
-        applied = st.get(key, "?") if key else "-"
-        print(f"{c:<3}{name:<8}{bound:<14}{str(applied):<10}{freq:<22}{duty}")
-    sc.screenshot(os.path.join(OUT, "pwm.png"))
+        try:
+            chsc = Scope()
+            chsc.cmd("TDIV 1E-5")
+            chsc.cmd(f"{c}:TURN ON"); chsc.cmd(f":CHAN{ch}:VIS ON")
+            chsc.cmd(f"{c}:VDIV 0.5"); chsc.cmd(f"{c}:OFST 0")
+            chsc.cmd(f"{c}:MEAS FREQ,ON"); chsc.cmd(f"{c}:MEAS DUTY,ON")
+            freq = chsc.cmd(f"{c}:PAVA? FREQ").split(",")[-1]
+            duty = chsc.cmd(f"{c}:PAVA? DUTY").split(",")[-1]
+            lo, hi = st.get(f"{name}PwmMin"), st.get(f"{name}PwmMax")
+            bound = f"{lo}~{hi}%" if lo is not None and hi is not None else "-"
+            applied = st.get(key, "?") if key else "-"
+            print(f"{c:<3}{name:<8}{bound:<14}{str(applied):<10}{freq:<22}{duty}")
+        except OSError as e:
+            print(f"{c:<3}{name:<8}{'-':<14}{'-':<10}(connection dropped: {type(e).__name__})")
+        finally:
+            try: chsc.close()
+            except Exception: pass
     print("expected: LED channels use the firmware power-calibration table "
           "(calibratePower in domain/LightControllFSM.py; DO NOT linearise on 'applied'); "
           "fan/pump duty is linear in speed. Confirm the mapping with the user, do not assume it.")
@@ -359,19 +367,40 @@ def exp_histplay(sc):
 
 def exp_params(sc):
     """PAVA type matrix: which measurement parameters return a value on this firmware.
-    The type list is the manual's :MEASure:SIMPle:ITEM set plus the wrong names seen in the wild."""
+    The type list is the manual's :MEASure:SIMPle:ITEM set plus the wrong names seen in the wild.
+    The scope drops long-lived connections, so we reconnect every BATCH types."""
     types = ("PKPK MAX MIN AMPL TOP BASE LEVELX CMEAN MEAN STDEV VSTD RMS CRMS "
              "MEDIAN CMEDIAN OVSN FPRE OVSP RPRE PER FREQ TMAX TMIN PWID NWID DUTY "
              "NDUTY WID NBWID DELAY TIMEL RISE FALL RISE20T80 FALL8020 CCJ PAREA "
              "NAREA AREA ABSAREA CYCLES REDGES FEDGES EDGES PPULSES NPULSES "
              "VPP VRMS VMAX VMIN VTOP VBASE AMP PW NW VAVG").split()
+    BATCH = 20
     ok, empty = [], []
-    for t in types:
-        sc.cmd(f"C1:MEAS {t},ON", wait=0.25)
-        v = sc.cmd(f"C1:PAVA? {t}", wait=0.25)
-        sc.cmd(f"C1:MEAS {t},OFF", wait=0.2)
+    cur = sc
+    cur.s.settimeout(1.0)   # unsupported PAVA? types return nothing; don't wait the full 4s
+    for i, t in enumerate(types):
+        if i % BATCH == 0 and i > 0:
+            try: cur.close()
+            except Exception: pass
+            try: cur = Scope(); cur.s.settimeout(1.0)
+            except OSError as e:
+                print(f"reconnect failed at {t}: {e}; aborting")
+                break
+        try:
+            cur.cmd(f"C1:MEAS {t},ON", wait=0.25)
+            v = cur.cmd(f"C1:PAVA? {t}", wait=0.25)
+            cur.cmd(f"C1:MEAS {t},OFF", wait=0.2)
+        except OSError as e:
+            print(f"{t}: connection dropped ({e}); reconnecting")
+            try: cur.close()
+            except Exception: pass
+            try: cur = Scope(); cur.s.settimeout(1.0)
+            except OSError: pass
+            continue
         val = v.split(",")[-1].strip() if v else ""
         (ok if val and "****" not in val and val != "?" else empty).append((t, val))
+    try: cur.close()
+    except Exception: pass
     print(f"WORKS ({len(ok)}):", ", ".join(f"{t}={v}" for t, v in ok))
     print(f"EMPTY ({len(empty)}):", ", ".join(t for t, _ in empty))
 
