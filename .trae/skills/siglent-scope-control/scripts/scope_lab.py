@@ -3,8 +3,8 @@
 # Experiments: idn, single, wgen, meas, trig <type>, decode_uart, mtest, history, acquire, ref, vxi11_idn
 import socket, sys, time, os
 
-SCOPE = "192.168.30.105"
-PORT = 5024
+SCOPE = os.environ.get("SCOPE_IP", "192.168.30.105")
+PORT = int(os.environ.get("SCOPE_PORT", "5024"))
 OUT = os.path.join(os.environ.get("TEMP", "."), "scope_lab")
 os.makedirs(OUT, exist_ok=True)
 
@@ -144,14 +144,13 @@ def exp_trig(sc, t):
         "QUALIFIED": ["TRIG:TYPE QUALIFIED", "TRIG:QUAL:ES C1", "TRIG:QUAL:ESL RIS",
                       "TRIG:QUAL:ELEV 0.7", "TRIG:QUAL:QS C3", "TRIG:QUAL:QLEV 0.7",
                       "TRIG:QUAL:TYPE STATE,HIGH"],
-        "NTHEdge": ["TRIG:TYPE NTHEdge", "TRIG:NEDG:SOUR C1", "TRIG:NEDG:SLOP RIS",
+        "NTHEDGE": ["TRIG:TYPE NTHEdge", "TRIG:NEDG:SOUR C1", "TRIG:NEDG:SLOP RIS",
                     "TRIG:NEDG:LEV 0.7", "TRIG:NEDG:IDLE 1.0E-4", "TRIG:NEDG:EDGE 3"],
     }
     if t not in cmds:
         print("unknown type; choose from", ", ".join(cmds)); return
     for c in cmds[t]:
         print(f"{c} ->", sc.cmd(c))
-    q = cmds[t][1].replace(" ", "?").split(",")[0]
     print("verify:", sc.cmd("TRIG:TYPE?"))
     sc.cmd("TRIG:MODE SINGLE"); sc.cmd("TRIG:RUN")
     ok = sc.wait_stop(tries=12)

@@ -1572,3 +1572,10 @@ python scripts\scope_lab.py runall    # ordered suite, appends to scope_lab\runa
 decoder and every experiment named here; `scripts/vnc_probe.py` performs the raw RFB handshake check.
 `runall` executes idn -> single -> display -> cursor -> dvm -> acquire -> meas -> fft -> history -> ref -> mask.
 Individual steps can be re-run: `python scripts\scope_lab.py runall fft`.
+
+Offline dry-run: the script honours `SCOPE_IP` / `SCOPE_PORT` env vars, so every experiment can be
+exercised against a local fake instrument that speaks the `>>` protocol (welcome banner, command echo,
+one response line, `PRIN? PNG` binary + prompt, `TRIG:STAT?` returning `Arm` a few times then `Stop`).
+Verified 2026-11-10 while the real scope was wedged: all 16 experiment paths execute without exceptions
+and the screenshot parser yields a valid PNG. Do this before touching hardware after any client edit —
+it catches parser/flow regressions the wedged scope cannot reveal.
