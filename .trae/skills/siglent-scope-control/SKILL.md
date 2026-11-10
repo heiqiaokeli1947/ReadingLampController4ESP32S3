@@ -863,6 +863,42 @@ TRIG:UART:LIM EQU         # data compare (COND=DATA): EQUal|GREaterthan|LESSthan
 TRIG:UART:DATA 83         # trigger byte value, decimal (0x53='S'); 256 = don't care
 ```
 
+**IIC trigger** (manual pp.561–571) — trigger on I2C bus activity (e.g. sensor/RTC transactions on the ESP32 I2C bus):
+```
+TRIG:TYPE IIC
+TRIG:IIC:SCLS C1          # SCL source (C<x>|D<n>)
+TRIG:IIC:SDAS C2          # SDA source
+TRIG:IIC:SCLT 1.65        # SCL threshold V; range ±(4.1*VDIV-OFST) on SDS2000X HD
+TRIG:IIC:SDAT 1.65        # SDA threshold V
+TRIG:IIC:COND 7ADDRess    # condition: STARt|STOP|RESTart|NACK|EEPRom|7ADDRess|10ADDress|DLENgth
+TRIG:IIC:ALEN 7BIT        # address length: 7BIT|10BIT
+TRIG:IIC:ADDR 60          # trigger address, decimal [0,127] (0x3C = 60, typical OLED)
+TRIG:IIC:RWB ANY          # R/W bit (COND=7ADDRess/10ADDress): WRITe|READ|ANY
+TRIG:IIC:DATA 256         # data byte [0,256]; 256 = don't care
+TRIG:IIC:DAT2 256         # second data byte [0,256]; 256 = don't care
+TRIG:IIC:DLEN 1           # data length in bytes [1,12] (used with COND=DLENgth)
+TRIG:IIC:LIM EQU          # data compare for COND=EEPRom: EQUal|GREaterthan|LESSthan
+```
+Condition notes: `EEPRom` triggers on EEPROM reads (1010xxx address + data compare via LIM); `DLENgth` triggers when the transfer reaches DLEN bytes; `NACK` fires on missing ACK — useful to catch a dead I2C device.
+
+**SPI trigger** (manual pp.573–589) — trigger on SPI bus activity:
+```
+TRIG:TYPE SPI
+TRIG:SPI:TTYP MOSI        # trigger data line: MISO|MOSI
+TRIG:SPI:CLKS C1          # CLK source (C<x>|D<n>)
+TRIG:SPI:CLKT 1.65        # CLK threshold V
+TRIG:SPI:MOSIS C2         # MOSI source; MISOSource/MISOThreshold for MISO
+TRIG:SPI:MOSIT 1.65       # MOSI threshold V
+TRIG:SPI:CSTY CS          # frame detect: CS|NCS|TIMeout[,<time 1E-7..5E-3 s>]
+TRIG:SPI:CSS C3           # CS source (NCSSource/NCSThreshold for NCS type)
+TRIG:SPI:CST 1.65         # CS threshold V
+TRIG:SPI:LATC RIS         # CLK sampling edge: RISing|FALLing
+TRIG:SPI:BIT MSB          # bit order: LSB|MSB (query returns LSB|MSB)
+TRIG:SPI:DLEN 8           # data length in bits [4,96]
+TRIG:SPI:DATA 1,0,0,0,0,0,1,0   # bit pattern MSB-first, one param per bit; X = don't care
+```
+Notes: `DATA` is a Command (no query) — bit count must match DLENgth, params listed high-to-low bit. With `CSTY TIMeout`, no CS channel is needed: a frame ends when CLK is idle for the timeout.
+
 Note: `DEC:BUS1:PROT?`/`RXSOUR?` may return empty even though set commands work (observed on this firmware). `DEC:BUS1:RES?` is the reliable way to pull decoded data.
 
 ## DVM (Digital Voltmeter)
