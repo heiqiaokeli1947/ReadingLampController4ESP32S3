@@ -504,6 +504,7 @@ FUNC1:FFT:WIND FLATtop    # window: RECTangle|BLACkman|HANNing|HAMMing|FLATtop (
 FUNC1:FFT:SEAR:THR -40    # peak-search threshold (unit follows FFT:UNIT)
 FUNC1:FFT:SEAR:EXC 20     # peak-search excursion (dB above neighbors)
 FUNC1:FFT:SEAR:RES?       # peak list -> Peaks,1,2.50E+04,1.20E+00;2,... (no,freq,ampl)
+FUNC2:FFT:RESET           # command only: restart averaging count when FFT:MODE AVERage
 ```
 
 **Other math operation extras** (manual pp.209–246):
@@ -560,6 +561,19 @@ CURS:X2?                  # query -> 4.00E-05
 CURS:XDEL?                # X2-X1 -> 4.00E-05 (40 us)
 CURS:IXD?                 # 1/(X2-X1) -> 2.500E+04 (25 kHz) — great for quick frequency check
 CURS OFF                  # disable cursors
+```
+
+Additional cursor commands (manual pp.55–70):
+```
+CURS:MODE MAN,Y           # Y cursors (voltage); XY = both
+CURS:Y1 1.20E+00          # Y1 position (V), range ±grid/2×VDIV
+CURS:Y2 2.80E+00          # Y2 position (V)
+CURS:YDEL?                # Y2-Y1 (query only)
+CURS:MODE MEASure         # measure cursors: cursor tracks an ADV measurement item
+CURS:MITem PKPK,C2        # set measure-cursor item: <type>,<source1>[,<source2>]
+CURS:TAGS FIXed           # value tag style: FIXed | FOLLowing (follows cursor)
+CURS:XREF DEL             # X expansion strategy: DELay (value fixed) | POSition (screen pos fixed)
+CURS:YREF OFFS            # Y expansion strategy: OFFSet (value fixed) | POSition
 ```
 
 ## Measurement Statistics
