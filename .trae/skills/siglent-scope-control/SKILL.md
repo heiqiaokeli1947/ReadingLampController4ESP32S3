@@ -1247,3 +1247,119 @@ Observed 2026-11-10: the instrument app wedged (likely during an `ASET` + immedi
 | Ports 22 (SSH), 23 (telnet) | closed | closed |
 
 **Recovery: physical power cycle only.** `SYSTem:REBoot` exists in SCPI but cannot be delivered (proxy reports device-not-connected; no reboot endpoint on the web server). VNC input cannot be delivered either (handshake never completes). When a wedge is suspected, confirm with the table above before blaming the network, then ask the user to power-cycle and poll port 5024 until it reopens (boot takes ~1–2 min).
+
+## Serial Bus Decode (DECode) Subsystem (manual pp.71–172)
+
+Two independent decode buses (BUS1, BUS2). Enable the global decode switch, pick a protocol per bus, configure sources/thresholds, then read results as text.
+
+### Global & bus control
+```
+:DECode ON                  # master decode switch: ON|OFF
+:DECode:LIST D1             # on-screen result list: OFF|D1|D2
+:DECode:LIST:LINE 6         # list rows shown [1,7]
+:DECode:LIST:SCRoll 3       # selected list row
+:DECode:BUS1 ON             # per-bus switch: ON|OFF
+:DECode:BUS1:PROTocol IIC   # IIC|SPI|UART|CAN|LIN|FLEXray|CANFd|IIS|M1553
+:DECode:BUS1:FORMat HEX     # display format: BINary|DECimal|HEX|ASCii
+:DECode:BUS1:COPY FROMtrigger   # sync decode settings from trigger (TOTRigger = reverse)
+:DECode:BUS1:RESult?        # decoded frames as text; header row first, frames separated by ';'
+                             # e.g. "lin,sync,id,parity,data,checksum;\n0x55,0x06,0,0x54\s0x5F,0x46;"
+```
+Short form: `DEC`. Note CAN/LIN/FLEXray/CANFd/IIS/M1553 decode may require license options on some models.
+
+### Threshold rule (all protocols)
+Threshold range for SDS2000X HD: `[-4.1*VDIV - OFST, +4.1*VDIV - OFST]` (same clamp family as trigger level — verify with the `?` query after setting).
+
+### IIC decode (pp.80–86)
+```
+:DECode:BUS1:IIC:SCLSource C1      # SCL source: C1..C4 (or D0..D15 with MSO)
+:DECode:BUS1:IIC:SCLThreshold 1.00E+00
+:DECode:BUS1:IIC:SDASource C2
+:DECode:BUS1:IIC:SDAThreshold 1.00E+00
+:DECode:BUS1:IIC:RWBit ON          # include R/W bit in result: ON|OFF
+```
+
+### SPI decode (pp.87–101)
+```
+:DECode:BUS1:SPI:CLKSource C1      # CLK source + :CLKThreshold
+:DECode:BUS1:SPI:MOSISource C2     # MOSI source + :MOSIThreshold
+:DECode:BUS1:SPI:MISOSource C3     # MISO source + :MISOThreshold
+:DECode:BUS1:SPI:CSTYpe CS         # framing: NCS|CS|TIMeout[,<time 1E-7..5E-3 s>]
+:DECode:BUS1:SPI:CSSource C4       # CS source + :CSThreshold (or NCSSource/NCSThreshold)
+:DECode:BUS1:SPI:DLENgth 8         # data word length [4,32]
+:DECode:BUS1:SPI:BITorder MSB      # LSB|MSB
+:DECode:BUS1:SPI:LATChedge RISing  # sampling edge: RISing|FALLing
+```
+
+### UART decode (pp.102–112)
+```
+:DECode:BUS1:UART:RXSource C1      # RX source + :RXThreshold (TX: TXSource/TXThreshold)
+:DECode:BUS1:UART:BAUD 115200bps   # 600..115200bps presets | CUSTom[,300..20000000]
+:DECode:BUS1:UART:DLENgth 8        # data bits [5,8]
+:DECode:BUS1:UART:STOP 1           # stop bits: 1|1.5|2
+:DECode:BUS1:UART:PARity NONE      # NONE|ODD|EVEN|MARK|SPACe
+:DECode:BUS1:UART:IDLE HIGH        # idle level: LOW|HIGH
+:DECode:BUS1:UART:BITorder LSB     # LSB|MSB
+```
+
+### CAN / LIN / FlexRay / CAN FD decode (pp.113–129)
+```
+:DECode:BUS1:CAN:SOURce C1         # + :CAN:THReshold
+:DECode:BUS1:CAN:BAUD 500kbps      # 5k..1M presets | CUSTom[,5000..1000000]
+:DECode:BUS1:LIN:SOURce C1         # + :LIN:THReshold
+:DECode:BUS1:LIN:BAUD 19200bps     # 600..19200 presets | CUSTom[,300..20000000]
+:DECode:BUS1:FLEXray:SOURce C1     # + :FLEXray:THReshold
+:DECode:BUS1:FLEXray:BAUD 10Mbps   # 2500k|5M|10M | CUSTom[,1000000..20000000]
+:DECode:BUS1:CANFd:SOURce C1       # + :CANFd:THReshold
+:DECode:BUS1:CANFd:BAUDNominal 500kbps  # 10k..1M presets | CUSTom[,10000..1000000]
+:DECode:BUS1:CANFd:BAUDData 2Mbps       # 500k..10M presets | CUSTom[,100000..10000000]
+```
+
+### IIS audio decode (pp.130–143)
+```
+:DECode:BUS1:IIS:BCLKSource C1     # bit clock + :BCLKThreshold
+:DECode:BUS1:IIS:WSSource C2       # word select + :WSTHreshold
+:DECode:BUS1:IIS:DSource C3        # data + :DTHReshold
+:DECode:BUS1:IIS:AVARiant I2S      # I2S|LJ|RJ (justification)
+:DECode:BUS1:IIS:LATChedge RISing  # BCLK sampling edge
+:DECode:BUS1:IIS:DLENgth 16        # data bits [1,32]
+:DECode:BUS1:IIS:SBIT 0            # start bit [0,31]
+:DECode:BUS1:IIS:BITorder MSB
+:DECode:BUS1:IIS:LCH LOW           # WS level meaning "left": LOW|HIGH
+:DECode:BUS1:IIS:ANNotate ALL      # annotate channels: ALL|LEFT|RIGHt
+```
+
+### M1553 decode (pp.144–146, option)
+```
+:DECode:BUS1:M1553:SOURce C1
+:DECode:BUS1:M1553:LTHReshold -1.00E+00   # lower threshold (must be < upper)
+:DECode:BUS1:M1553:UTHReshold 1.00E+00    # upper threshold
+```
+
+### SENT decode (pp.148–157, option)
+```
+:DECode:BUS1:SENT:SOURce C1        # + :SENT:THReshold
+:DECode:BUS1:SENT:FORMat NIBBles   # NIBBles|FSIGnal|SSERial|ESERial
+:DECode:BUS1:SENT:CLOCk 3.00E-06   # tick period [500E-9, 300E-6] s
+:DECode:BUS1:SENT:IDLE LOW         # idle level
+:DECode:BUS1:SENT:LENGth 6         # data nibbles
+:DECode:BUS1:SENT:CRC ON           # ON=2010 CRC, OFF=2008 CRC
+:DECode:BUS1:SENT:PPULse ON        # pause pulse present
+```
+
+### Manchester decode (pp.159–172, option)
+```
+:DECode:BUS1:MANChester:SOURce C1  # + :MANChester:THReshold
+:DECode:BUS1:MANChester:BAUD 9600  # NR1 [500, 5000000] (plain number, no "bps" suffix)
+:DECode:BUS1:MANChester:POLarity RISing  # edge encoding logic-1: RISing|FALLing
+:DECode:BUS1:MANChester:IDLE LOW
+:DECode:BUS1:MANChester:IBITs 8    # idle bits [2,32]
+:DECode:BUS1:MANChester:STARt 1    # start edge index [1,32]
+:DECode:BUS1:MANChester:SSIZe 0    # sync size [0,32]
+:DECode:BUS1:MANChester:HSIZe 0    # header size [0,32]
+:DECode:BUS1:MANChester:TSIZe 0    # trailer size [0,32]
+:DECode:BUS1:MANChester:WSIZe 8    # word size [2,8]
+:DECode:BUS1:MANChester:DSIZe 16   # words per frame [1,255]
+:DECode:BUS1:MANChester:DISPlay WORD   # result display: WORD|BIT
+:DECode:BUS1:MANChester:BITorder MSB
+```
