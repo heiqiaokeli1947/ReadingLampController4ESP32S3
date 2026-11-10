@@ -482,16 +482,43 @@ FUNC1:FFT:SEAR:EXC 20     # peak-search excursion (dB above neighbors)
 FUNC1:FFT:SEAR:RES?       # peak list -> Peaks,1,2.50E+04,1.20E+00;2,... (no,freq,ampl)
 ```
 
-**Other math operation extras** (manual pp.215–246):
+**Other math operation extras** (manual pp.209–246):
 ```
 # Digital filter operation (FUNCn:OPER FILTer) — e.g. low-pass a noisy PWM:
 FUNC1:FILT:TYP LPAS       # LPASs|HPASs|BPASs|BREJect
 FUNC1:FILT:HFR 1.00E+06   # upper freq (BPASs/BREJect)
 FUNC1:FILT:LFR 1.00E+03   # lower freq
-# ERES resolution enhancement (0.5–3.0 bits), MAXHold/MINHold envelope sweeps:
+# ERES resolution enhancement (0.5|1.0|1.5|2.0|2.5|3.0 bits):
 FUNC1:ERES:BITS 2.0       # for FUNCn:OPER ERES
-FUNC1:MAXH:SW 100         # maxhold sweep limit [1, 2^31-2]
+# MAXHold/MINHold envelope sweeps [1, 2147483646]:
+FUNC1:MAXH:SW 100         # maxhold sweep limit
 FUNC1:MINH:SW 100         # minhold sweep limit
+# Average count for FUNCn:OPER AVERage (SDS2000X HD: 4|16|32|64|128|256|512|1024):
+FUNC1:AVER:NUM 128
+# Derivative step size (NR1 integer) for FUNCn:OPER DIFF:
+FUNC1:DIFF:DX 4
+# Integrate (FUNCn:OPER INTegrate): gate between two time thresholds, DC offset:
+FUNC1:INTG:GATE ON        # enable gated integration
+FUNC:GVAL -1.00E-07,1.00E-07  # gate A/B time positions (global, GA <= GB; clamps to GA=GB)
+FUNC1:INTG:OFFS 1.00E-01  # integrate DC offset, range [-1.67, 1.67]
+# Upsample factor for FUNCn:OPER INTErpolate: 2|5|10|20:
+FUNC1:INTE:COEF 10
+# Invert / reposition / label the math trace:
+FUNC1:INV ON              # invert math waveform
+FUNC1:POS 5.00E-01        # math vertical position (range depends on operation)
+FUNC1:LAB ON              # show math label
+FUNC1:LAB:TEXT "PWR"      # label text, max 20 chars; saved to non-volatile label list
+```
+
+**FFT extras** (manual pp.211–231):
+```
+FUNC:FFTD SPL             # FFT display layout: SPLit|FULL|EXCLusive
+FUNC1:FFT:POIN 128k       # max FFT points, SDS2000X HD: 1k|2k|...|512k|1M
+FUNC1:FFT:RESET           # restart averaging count (MODE AVERage)
+FUNC1:FFT:LOAD 50         # external load ohm [1, 1000000], only when UNIT=DBm
+FUNC1:FFT:SCAL 2.00E+01   # FFT vertical scale: dBVrms/dBm [0.1,20], Vrms [1E-3,10]
+FUNC1:FFT:RLEV 1.00E+01   # FFT reference level (range depends on probe & unit)
+FUNC1:FFT:SEAR PEAK       # search tool: OFF|PEAK|MARKer
 ```
 
 ## Cursor Measurements
@@ -664,13 +691,54 @@ PRIN? PNG               # screen dump as PNG
 ```
 SYST:REB                # :SYSTem:REBoot — restart the oscilloscope (use to recover a wedged app)
 SYST:SHUT               # :SYSTem:SHUTdown — shut down the OS
-SYST:PON?               # Power-On-Line state (auto-reboot on power restore)
+SYST:PON ON             # Power-On-Line: auto-boot when mains power is restored (keep ON for remote recovery)
+SYST:PON?               # query -> ON|OFF
 SYST:TOUC ON|OFF        # enable/disable touch screen
 SYST:SELFC              # start self-calibration (DISCONNECT ALL PROBES first; takes several minutes)
 SYST:SELFC?             # query -> DOING|DONE
 ```
 
-If the SCPI server hangs, `SYST:REB` cannot be delivered (server is the hung component) — physical power cycle is required. But for a responsive scope, `SYST:REB` is the clean way to apply license/config changes.
+If the SCPI server hangs, `SYST:REB` cannot be delivered (server is the hung component) — physical power cycle is required. But for a responsive scope, `SYST:REB` is the clean way to apply license/config changes. With `SYST:PON ON`, a power strip switched remotely is enough to recover a wedged scope.
+
+## System Subsystem (SYSTem, manual pp.370–389)
+
+```
+SYST:BUZZ ON            # buzzer on/off (key beep)
+SYST:CLOC IN_ON         # clock source: EXT (external 10 MHz ref, 10M out disabled)
+                        #   IN_ON  = internal ref + 10 MHz output ON (rear [10M Out] port)
+                        #   IN_OFF = internal ref + 10 MHz output OFF
+SYST:CLOC?              # query -> EXT|IN_ON|IN_OFF
+SYST:REM ON             # remote lock: front panel + touch locked, "Remote" shown on screen
+SYST:REM?               # query -> ON|OFF
+SYST:LANG ENGL          # UI language: SCHinese|TCHinese|ENGLish|FRENch|JAPanese|KORean|DEUTsch|ESPan|RUSSian|ITALiana|PORTuguese
+SYST:MENU ON            # menu bar on/off (models with menu switch only)
+SYST:SSAV 10MIN         # screensaver: OFF|1MIN|5MIN|10MIN|30MIN|60MIN
+SYST:DATE 20261110      # system date, format YYYYMMDD (8-digit NR1)
+SYST:TIME 081040        # system time, 24h format HHMMSS
+SYST:EDUM AUTOS,OFF     # education mode: lock AUTOSet|MEASure|CURSor (ON=enabled/unlocked)
+SYST:EDUM?              # query all -> AUTOSet,ON;MEASure,ON;CURSor,ON
+```
+
+### LAN configuration (SYSTem:COMMunicate)
+
+```
+SYST:COMM:LAN:TYPE DHCP        # STATIC|DHCP
+SYST:COMM:LAN:IPAD "192.168.30.105"   # IP address (STATIC mode; quoted string)
+SYST:COMM:LAN:SMAS "255.255.255.0"    # subnet mask
+SYST:COMM:LAN:GAT "192.168.30.1"      # gateway
+SYST:COMM:LAN:MAC?             # query -> "00:01:D2:0C:00:A0" (read-only)
+SYST:COMM:VNCP 5900            # VNC port, range [5900, 5999]
+```
+
+### Network storage (SYSTem:NSTorage)
+
+```
+SYST:NST "//server/share","user","pwd",0,1,0,0,0   # path,user,pwd,anon,auto_con,rem_path,rem_user,rem_pwd
+SYST:NST?                   # password always returned as "***"
+SYST:NST:CONN               # mount now
+SYST:NST:DISC               # unmount
+SYST:NST:STAT?              # query -> ON|OFF (mounted?)
+```
 
 ## Timebase Window (Zoom)
 
