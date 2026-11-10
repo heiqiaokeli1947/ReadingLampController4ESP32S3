@@ -832,9 +832,9 @@ TIM:REF DELay             # zoom reference strategy: DELay (expand around center
 
 ## Save / Recall Setup
 ```
-*SAV 1                    # save current setup to slot 1 (slots 1-10)
-RCL 1                     # recall setup from slot 1
-SAVE:SET INT,1            # save setup to internal slot 1 (or SAVE:SET EXT,"local/x.xml")
+SAVE:SET INT,1            # save setup to internal slot 1 (documented; or SAVE:SET EXT,"local/x.xml")
+*SAV 1                    # shortcut alias seen on this firmware; NOT in the Programming Guide - prefer SAVE:SET
+RCL 1                     # recall setup slot 1; also not in the guide - prefer REC:SET INT,1
 SAVE:IMAG "local/SIGLENT/screen.png",PNG,OFF   # save screenshot to file
 SAVE:BIN "local/SIGLENT/c1.bin",C1             # save waveform binary data
 SAVE:CSV "local/SIGLENT/c1.csv",C1,ON          # save waveform CSV (ON = include params)
@@ -1221,9 +1221,9 @@ ACQ:CSW                   # clear sweep
 *RST                  # reset to default config (same as front-panel Default button)
 SYST:ERR?             # last error, e.g. -113,"Undefined header;..." (standard SCPI; NOT listed in the Programming Guide)
 ```
-Note: the manual lists only `*IDN`, `*OPC`, `*RST` as common commands (p.18), but this firmware
-also accepts `*CLS`, `*STB?`, `*SAV`/`*RCL` (verified). `*ESE`/`*SRE`/`*TRG`/`*TST?` are not
-documented — use `*STB?`/`SYST:ERR?` for status.
+Note: the manual lists only `*IDN`, `*OPC`, `*RST` as common commands (p.18). This firmware also
+accepts `*CLS`, `*STB?`, `*SAV`, `RCL`, `SYST:ERR?` — all are firmware/standard-SCPI extensions that
+are absent from the Programming Guide, so prefer the documented `SAVE:SET`/`REC:SET` and `*STB?`.
 
 ## PWM Verification Workflow
 
