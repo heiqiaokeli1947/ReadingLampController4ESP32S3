@@ -546,6 +546,7 @@ DISP:BACK 100         # backlight brightness 0-100
 DISP:COL ON           # color grade ON|OFF (shows waveform density)
 DISP:INT 75,100       # intensity: waveform%,grid%
 DISP:GRIDS LIGH       # grid style: FULL|LIGHt|NONE
+DISP:GRAT 50          # grid brightness 0-100 (0 = dimmest, 100 = brightest)
 DISP:TRAN 80          # menu transparency 0-100
 DISP:CLE              # clear display/persistence
 DISP:MENU EMB         # menu style: EMBedded|FLOating
@@ -1161,6 +1162,7 @@ MTES:MASK:CRE 0.8,0.08    # create mask with X,Y margins in div, range [0.08, 4.
 MTES ON                   # enable mask test
 MTES:OPER ON              # start the test run
 MTES:COUN?                # results -> FAIL,<n>,PASS,<n>,TOTAL,<n>
+MTES:IDIS ON              # show mask-test result panel ON|OFF
 MTES:RES                  # reset counters
 MTES:FUNC:BUZZ ON         # buzzer on fail
 MTES:FUNC:COF ON          # Capture-on-Fail: save failing frame screenshots to SIGLENT/ dir
@@ -1491,3 +1493,31 @@ Threshold range for SDS2000X HD: `[-4.1*VDIV - OFST, +4.1*VDIV - OFST]` (same cl
 :ACQuire:POINts?              # query: sample points of current waveform, e.g. 1.25E+08
 ```
 Short form: `ACQ`.
+
+## Manual Coverage Audit
+
+The programming guide (757 pages) contains a 594-entry command index. On 2026-11-10 every index entry
+was cross-checked against this document by normalizing long/short forms (`:CHANnel<n>:BWLimit` ~ `CHAN1:BWL`).
+
+| Subsystem | Index entries | Status |
+|---|---|---|
+| TRIGger (all types incl. serial) | 244 | covered |
+| DECode (15 protocols) | 89 | covered |
+| FUNCtion (math, FFT, filter, integrate) | 39 | covered |
+| SEARch | 34 | covered |
+| MEASure | 24 | covered |
+| SYSTem | 24 | covered |
+| CURSor | 15 | covered |
+| DIGital | 15 | covered |
+| CHANnel | 14 | covered |
+| ACQuire | 13 | covered |
+| MTESt | 13 | covered |
+| DISPlay | 12 | covered |
+| MEMory / WAVeform / SAVe / RECall | 29 | covered |
+| DVM / TIMebase / HISTORy / REF / AUToset / FORMat / PRINt | 29 | covered |
+| **Total** | **594** | **covered** |
+
+Gaps found during the audit and fixed the same day: `DISP:GRAT` (grid brightness 0-100),
+`MTES:IDIS` (mask-test result panel). Read-only helpers worth knowing: `WAV:MAXPoint?`
+(max points per transfer piece), `FUNC<n>:FFT:HSCale?`, `CURS<n>:IXDelta?/XDELta?/YDELta?`
+(cursor deltas are queries only - move the cursors with `CURS:X1/X2/Y1/Y2`).
