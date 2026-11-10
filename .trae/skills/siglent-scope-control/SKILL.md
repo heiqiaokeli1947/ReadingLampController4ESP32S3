@@ -152,6 +152,7 @@ TRIG:MODE?            # query -> AUTO
 TRIG:FREQ?            # hardware frequency counter of trigger source (Hz), read-only
 TRIG:EDGE:IMP FIFT    # EXT trigger source impedance: ONEMeg|FIFTy (EXT/EXT5 sources only)
 FORM:DATA CUSTom,7    # set query response precision: SINGle(7)|DOUBle(14)|CUSTom,1-64 digits
+                      # (factory default is 3 significant digits - too coarse for counters)
 ```
 
 **Trigger Level Clamping (IMPORTANT):** The firmware clamps the trigger level to approximately **1.1 × VDIV** from center, NOT the 4.1 × VDIV stated in the programming manual. Always verify with `TRIG:EDGE:LEV?` after setting.
@@ -384,6 +385,8 @@ Discovered web UI endpoints (after password login to `/login.php`): `/welcome.ph
 ASET                  # auto-configure timebase, voltage scale, and trigger for the active signal
 ```
 ASET is the fastest way to get a stable display. After ASET, fine-tune VDIV and TDIV manually.
+Per the manual (p.23) the official command is `:AUToset` (short `AUT`); `ASET` is also accepted by
+this firmware. Autoset is **not recommended for signals below 100 Hz**.
 
 ### Measurements
 ```
