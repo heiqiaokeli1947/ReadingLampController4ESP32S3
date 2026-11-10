@@ -29,6 +29,10 @@ $stream = $client.GetStream()
 $stream.ReadTimeout = 3000
 ```
 
+This exact template was smoke-tested against the local mock scope (port 15024) on 2026-11-10:
+`*IDN?` -> `Siglent Technologies,SDS2204X HD,...`, `TRIG:STAT?` -> `Trig'd`,
+`ACQ:SRAT?` -> `ACQ:SRAT 1.00E+09Sa/s`, `C1:PAVA? FREQ` -> `C1:PAVA FREQ,2.50E+04Hz`.
+
 ## Read/Write Helpers
 
 ```powershell
