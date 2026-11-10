@@ -899,6 +899,37 @@ TRIG:SPI:DATA 1,0,0,0,0,0,1,0   # bit pattern MSB-first, one param per bit; X = 
 ```
 Notes: `DATA` is a Command (no query) — bit count must match DLENgth, params listed high-to-low bit. With `CSTY TIMeout`, no CS channel is needed: a frame ends when CLK is idle for the timeout.
 
+**CAN trigger** (manual pp.605–613) — trigger on CAN bus frames:
+```
+TRIG:TYPE CAN
+TRIG:CAN:SOUR C1          # source channel (C<x>|D<n>)
+TRIG:CAN:THR 1.65         # threshold V
+TRIG:CAN:BAUD 500kbps     # 5k/10k/20k/50k/100k/125k/250k/500k/800k/1Mbps or CUSTom,[5000-1000000]
+TRIG:CAN:COND ID          # condition: STARt|REMote|ID|ID_AND_DATA|ERRor
+TRIG:CAN:IDL 11BITS       # ID length: 11BITS|29BITS
+TRIG:CAN:ID 256           # trigger ID, decimal; 11-bit range [0,2048], 29-bit [0,536870912]; max value = don't care
+TRIG:CAN:DATA 256         # data byte [0,256]; 256 = don't care (COND=ID_AND_DATA)
+TRIG:CAN:DAT2 256         # second data byte [0,256]; 256 = don't care
+```
+
+**LIN trigger** (manual pp.614–627) — trigger on LIN bus frames:
+```
+TRIG:TYPE LIN
+TRIG:LIN:SOUR C1          # source channel
+TRIG:LIN:THR 1.65         # threshold V
+TRIG:LIN:BAUD 19200bps    # 600/1200/2400/4800/9600/19200bps or CUSTom,[300-20000000]
+TRIG:LIN:COND ID          # condition: BReak|ID|ID_AND_DATA|DATA_ERROR
+TRIG:LIN:ID 43            # trigger ID, decimal [0,64]; 64 = don't care
+TRIG:LIN:DATA 256         # data byte [0,256]; 256 = don't care (COND=ID_AND_DATA)
+TRIG:LIN:DAT2 256         # second data byte [0,256]; 256 = don't care
+TRIG:LIN:ERR:CHEC 1       # COND=DATA_ERROR: trigger on checksum error (0|1)
+TRIG:LIN:ERR:SYNC 1       # ...sync-field error (0|1)
+TRIG:LIN:ERR:PAR 1        # ...parity error (0|1)
+TRIG:LIN:ERR:ID 1         # ...ID error (0|1)
+TRIG:LIN:ERR:DLEN 1       # ...data-length error (0|1)
+TRIG:LIN:STAN 1           # LIN standard for checksum: 0=Rev1.3, 1=Rev2.x
+```
+
 Note: `DEC:BUS1:PROT?`/`RXSOUR?` may return empty even though set commands work (observed on this firmware). `DEC:BUS1:RES?` is the reliable way to pull decoded data.
 
 ## DVM (Digital Voltmeter)
