@@ -1231,8 +1231,11 @@ documented — use `*STB?`/`SYST:ERR?` for status.
 2. Note `whiteApplied`, `yellowApplied`, `fanSpeed`, `pumpSpeed`
 3. For each active channel, enable `FREQ` and `DUTY` then read with `PAVA?`
 4. Compare measured duty against expected:
-   - `calPct = calibratePower(brightness, TABLE)` (lookup-table interpolation in `domain/LightControllFSM.py`)
-   - `actualDuty ≈ minDuty + (maxDuty - minDuty) * calPct / 100`
+   - `calPct = calibratePower(applied, WHITE_CALC_TABLE | YELLOW_CALC_TABLE)` — 23-point current-table
+     interpolation in `domain/LightControllFSM.py`; if an older doc says to use `applied` directly, that is wrong
+   - `actualDuty = minDuty + (maxDuty - minDuty) * calPct / 100`
+   - worked example (2026-11-10): applied=25.5 -> calPct(white)=76.71% -> duty=6+94*0.7671=78.1%;
+     the naive `6+94*0.255=30.0%` is off by ~48 points
    - minDuty: white=6, yellow=5, fan=10, pump=15; maxDuty=100 for all (verified live via `/status` on 2026-11-10)
    - `main.py` defaults are 15% for all four channels, so ALWAYS read `*PwmMin/*PwmMax` from `/status` instead of hard-coding
 
