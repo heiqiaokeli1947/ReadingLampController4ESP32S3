@@ -482,6 +482,13 @@ Findings that change how you write commands:
 | Reference display | `REFA ON` | no such command; `REFA:DATA SAVE,C1` / `REFA:DATA LOAD` / `REFA:DATA UNLoad` (p.317) |
 | Intensity | `DISP:INT 75,100` | single value: `DISP:INT 75` (p.195) |
 | Simple measurement | `MEAS:SIMP:ITEM PWID,C1` / `MEAS:SIMP:VALue?` | `MEAS:SIMP:SOUR C1`, `MEAS:SIMP:ITEM PWID,ON`, `MEAS:SIMP:VAL? PWID` (pp.278-280) |
+| Decode protocol | `DEC:BUS1:TYPE UART` | `DEC:BUS1:PROT UART` (`:DECode:BUS<n>:PROTocol`, p.78) |
+| Save waveform | `SAVE:WAV C1` | no such command; `SAVE:BIN "path.bin",C1` / `SAVE:CSV "path.csv",C1,ON` / `SAVE:REF "path.ref",C1` (pp.322-328) |
+
+Firmware aliases (accepted by this unit, different from manual naming):
+- `C1:VDIV` = `:CHANnel<n>:SCALe`; `C1:OFST` = `:CHANnel<n>:OFFSet`; `C1:CPL` = `:CHANnel<n>:COUPling` (manual short form is `CHAN1:COUP`).
+- `FUNC1:OFST` = `:FUNCtion<n>:POSition`.
+- `SEAR:NAV NEXT|PREV` and `SYST:ERR?` are not in the Programming Guide at all — treat as unverified firmware/standard-SCPI extensions.
 
 Firmware extensions **not present in the Programming Guide** (verified working on this unit, but do
 not assume portability to other Siglent models):
@@ -786,8 +793,8 @@ SEAR:EDGE:LEV 0.7         # search level
 SEAR:COUN?                # number of found events on current screen -> 4
 SEAR:EVEN?                # event index at screen center (acquisition stopped) -> 3
 SEAR:EVEN 1               # go to event 1
-SEAR:NAV NEXT             # next event
-SEAR:NAV PREV             # previous event
+SEAR:NAV NEXT             # next event (NOT in the Programming Guide; firmware/UI only — verify after recovery)
+SEAR:NAV PREV             # previous event (same caveat)
 SEAR:COPY FROM            # copy trigger settings INTO search (FROMtrigger|TOTRigger|CANCel)
 SEAR OFF                  # disable search
 ```
@@ -827,9 +834,11 @@ TIM:REF DELay             # zoom reference strategy: DELay (expand around center
 ```
 *SAV 1                    # save current setup to slot 1 (slots 1-10)
 RCL 1                     # recall setup from slot 1
-SAVE:WAV C1               # save C1 waveform data to file (on scope storage)
-SAVE:IMAG                 # save screen image
-SAVE:SET                  # save current setup to file
+SAVE:SET INT,1            # save setup to internal slot 1 (or SAVE:SET EXT,"local/x.xml")
+SAVE:IMAG "local/SIGLENT/screen.png",PNG,OFF   # save screenshot to file
+SAVE:BIN "local/SIGLENT/c1.bin",C1             # save waveform binary data
+SAVE:CSV "local/SIGLENT/c1.csv",C1,ON          # save waveform CSV (ON = include params)
+SAVE:REF "local/SIGLENT/channel.ref",C1        # save C1 into a .ref file
 REC:FDEF                  # recall factory defaults
 REC:SET INT,1             # recall internal setup slot 1-10
 REC:SET EXT,"U-disk0/SIGLENT/default.xml"   # recall .xml setup from U-disk0/local/net_storage
@@ -1210,7 +1219,7 @@ ACQ:CSW                   # clear sweep
 ```
 *OPC?                 # operation complete -> 1
 *RST                  # reset to default config (same as front-panel Default button)
-SYST:ERR?             # last error, e.g. -113,"Undefined header;..."
+SYST:ERR?             # last error, e.g. -113,"Undefined header;..." (standard SCPI; NOT listed in the Programming Guide)
 ```
 Note: the manual lists only `*IDN`, `*OPC`, `*RST` as common commands (p.18), but this firmware
 also accepts `*CLS`, `*STB?`, `*SAV`/`*RCL` (verified). `*ESE`/`*SRE`/`*TRG`/`*TST?` are not
@@ -1455,13 +1464,13 @@ Threshold range for SDS2000X HD: `[-4.1*VDIV - OFST, +4.1*VDIV - OFST]` (same cl
 
 ### CAN / LIN / FlexRay / CAN FD decode (pp.113–129)
 ```
-:DECode:BUS1:CAN:SOURce C1         # + :CAN:THReshold
+:DECode:BUS1:CAN:SOURce C1         # + :DECode:BUS1:CAN:THReshold 1.5
 :DECode:BUS1:CAN:BAUD 500kbps      # 5k..1M presets | CUSTom[,5000..1000000]
-:DECode:BUS1:LIN:SOURce C1         # + :LIN:THReshold
+:DECode:BUS1:LIN:SOURce C1         # + :DECode:BUS1:LIN:THReshold 1.5
 :DECode:BUS1:LIN:BAUD 19200bps     # 600..19200 presets | CUSTom[,300..20000000]
-:DECode:BUS1:FLEXray:SOURce C1     # + :FLEXray:THReshold
+:DECode:BUS1:FLEXray:SOURce C1     # + :DECode:BUS1:FLEXray:THReshold 1.5
 :DECode:BUS1:FLEXray:BAUD 10Mbps   # 2500k|5M|10M | CUSTom[,1000000..20000000]
-:DECode:BUS1:CANFd:SOURce C1       # + :CANFd:THReshold
+:DECode:BUS1:CANFd:SOURce C1       # + :DECode:BUS1:CANFd:THReshold 1.5
 :DECode:BUS1:CANFd:BAUDNominal 500kbps  # 10k..1M presets | CUSTom[,10000..1000000]
 :DECode:BUS1:CANFd:BAUDData 2Mbps       # 500k..10M presets | CUSTom[,100000..10000000]
 ```
@@ -1489,7 +1498,7 @@ Threshold range for SDS2000X HD: `[-4.1*VDIV - OFST, +4.1*VDIV - OFST]` (same cl
 
 ### SENT decode (pp.148–157, option)
 ```
-:DECode:BUS1:SENT:SOURce C1        # + :SENT:THReshold
+:DECode:BUS1:SENT:SOURce C1        # + :DECode:BUS1:SENT:THReshold 1.5
 :DECode:BUS1:SENT:FORMat NIBBles   # NIBBles|FSIGnal|SSERial|ESERial
 :DECode:BUS1:SENT:CLOCk 3.00E-06   # tick period [500E-9, 300E-6] s
 :DECode:BUS1:SENT:IDLE LOW         # idle level
@@ -1500,7 +1509,7 @@ Threshold range for SDS2000X HD: `[-4.1*VDIV - OFST, +4.1*VDIV - OFST]` (same cl
 
 ### Manchester decode (pp.159–172, option)
 ```
-:DECode:BUS1:MANChester:SOURce C1  # + :MANChester:THReshold
+:DECode:BUS1:MANChester:SOURce C1  # + :DECode:BUS1:MANChester:THReshold 1.5
 :DECode:BUS1:MANChester:BAUD 9600  # NR1 [500, 5000000] (plain number, no "bps" suffix)
 :DECode:BUS1:MANChester:POLarity RISing  # edge encoding logic-1: RISing|FALLing
 :DECode:BUS1:MANChester:IDLE LOW
