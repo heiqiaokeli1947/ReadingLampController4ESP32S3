@@ -303,6 +303,22 @@ TRIG:SHOL:DS C2           # data source; TRIG:SHOL:DTHR 1.50E+00 = data threshol
 TRIG:SHOL:LEV HIGH        # data level to check: LOW|HIGH
 TRIG:SHOL:LIM LESS        # LESSthan|GREATerthan|INNer|OUTer
 TRIG:SHOL:TUPP 3.00E-08   # time bound [2ns, 20s] (TLOW also available)
+
+# Video trigger (manual pp.442–452) — trigger on analog video sync
+# (PAL/NTSC/HDTV or custom). Not used in this project but handy for camera/FPV work:
+TRIG:TYPE VIDEO
+TRIG:VID:SOUR C1          # source channel
+TRIG:VID:LEV 5.00E-01     # trigger level V (range ±(4.1*VDIV-OFST))
+TRIG:VID:STAN NTSC        # NTSC|PAL|P720L50|P720L60|P1080L50|P1080L60|I1080L50|I1080L60|CUSTom
+TRIG:VID:SYNC SEL         # sync mode: SELect (specific line/field)|ANY (any line)
+TRIG:VID:FIEL 1           # field 1|2 (interlaced standards: NTSC/PAL/1080i)
+TRIG:VID:LINE 2           # trigger line; range per standard: NTSC f1 [1,263] f2 [1,262],
+                          # PAL [1,313]/[1,312], 720p [1,750], 1080p [1,1125], 1080i [1,563]/[1,562]
+# Custom standard only:
+TRIG:VID:FCNT 1           # fields per frame: 1|2|4|8
+TRIG:VID:INT 1            # interlace ratio: 1|2|4|8 (1:1 .. 8:1)
+TRIG:VID:LCNT 625         # total lines per frame [300, 2000]
+TRIG:VID:FRAT 50Hz        # frame rate: 25Hz|30Hz|50Hz|60Hz
 ```
 
 **SCPI server hang warning:** Do NOT send `ASET` and immediately close the TCP connection — the scope's SCPI server (port 5024) can hang while ASET is processing, refusing new connections (web UI on port 80 stays alive). Wait for ASET to complete (~3-5s, poll `*OPC?`) before disconnecting. If hung, wait several minutes or power-cycle the scope. Note: when the instrument app wedges, BOTH raw 5024 and the HTTP proxy backend report "Device can not be connected" — only a power cycle (or long watchdog timeout) recovers.
