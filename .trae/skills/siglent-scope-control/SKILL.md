@@ -7,6 +7,56 @@ description: Operate the Siglent SDS2204X HD oscilloscope via SCPI over TCP to m
 
 Remote-control the Siglent SDS2204X HD oscilloscope to measure PWM signals from the ESP32-S3 reading lamp controller. Prefer SCPI over TCP (port 5024) over the web VNC interface because it is more reliable for programmatic measurement.
 
+## What this skill can do (capability map)
+
+**Measure — the reason this skill exists**
+- Read FREQ / DUTY / PER / PKPK / RMS / MAX / MIN / RISE / FALL on C1..C4 (four 25 kHz PWM outputs)
+- Compare the measured duty against the DUT `/status` snapshot *and* the firmware power-calibration table
+- Arm a single-shot capture and prove whether a PWM channel survives a state change
+
+**Capture / verify**
+- Trigger types: edge, pulse-width, slope, interval, dropout, runt, window, pattern, delay, qualified, Nth-edge, setup/hold, video (21 values on `TRIG:TYPE`)
+- Run control: AUTO / NORM / SINGLE, RUN / STOP, holdoff, history (segmented) playback
+- Decode: IIC, SPI, UART, CAN, LIN, FlexRay, CAN-FD, IIS, M1553, SENT, Manchester
+- Math: add/sub/mul/div, FFT, filter, ERES, average, integrate, differentiate; cursors; 15+ measurements + statistics; mask (pass/fail) test
+- Storage: save/recall setups, reference waveforms, BIN/CSV/MAT/REF waveform files, screenshots
+- Extras: built-in 25 MHz AWG (SDG-style `C1:BSWV`), DVM, 16 digital channels, search
+
+**Hard limits**
+- Screenshots can wedge the instrument app (see below)
+- Once the app is wedged, **nothing over the network recovers it** — SCPI, VNC key injection and
+  every reboot endpoint all fail; only a physical power cycle (or pressing Enter on the touchscreen) helps
+
+## Safety first: screenshots can wedge this scope (confirmed 2026-11-10)
+
+`PRIN?` / the web ScreenShot button can make the instrument show a **modal "save screenshot" dialog on
+its own screen**. That modal blocks the instrument app: SCPI 5024/5025 stop listening, VNC 5900 dies,
+and the web SCPI proxy answers `{"cmdrslt":"Device can not be connected"}`. There is no remote way to
+press Enter.
+
+Rules that follow:
+1. Treat screenshots as a **high-risk, attended-only operation**. If nobody can touch the scope, do
+   not call `PRIN?`, `SAVE:IMAG` or the browser ScreenShot button.
+2. Prefer numeric verification (`C1:PAVA?`) and `WAV:DATA?` for unattended runs — both are pure data
+   paths and never open a UI dialog.
+3. After any screenshot, probe `*IDN?` immediately. If it fails, the app is wedged — stop and ask for
+   a physical power cycle.
+4. `python scripts\scope_wait.py` is safe to leave running: it only opens TCP connections.
+
+## Known failure modes (cheat sheet)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| 5024/5025 refuse connections, port 80 alive | instrument app wedged (screenshot modal dialog) | press Enter/Save on the touchscreen, else power-cycle; no remote recovery |
+| `PAVA?` garbage / empty | measurement not enabled, or param unsupported | `C1:MEAS <p>,ON` first; use `PKPK`/`RMS`/`MAX`/`MIN` not `VPP`/`VRMS`/… |
+| PyVISA SOCKET replies off by one query | `>>` prompt is not newline-terminated | use a raw socket, do not use PyVISA SOCKET |
+| 5025 hangs after one timeout | raw SCPI port does not re-arm | close + reopen, or use 5024 |
+| `TRIG:MODE?` returns `STOP` after `TRIG:STOP` | STOP replaces the trigger mode | send `TRIG:MODE AUTO`, wait 1 s, check `TRIG:STAT?` |
+| trigger level refuses high values | clamped to ~1.1 × VDIV | raise VDIV first, verify with `TRIG:EDGE:LEV?` |
+| `VTOP`/`VBASE`/`AMP`/`PW` empty via `PAVA?` | not exposed on this firmware | use `MEAS:ADV` or `MEAS:SIMP` paths, or `WAV:DATA?` |
+| every reply starts with a NUL | firmware prefixes 0x00 | strip leading `\x00` before parsing |
+| `SYST:ERR?`, `*STB?`, `SEAR:NAV` work but are not in the manual | firmware/standard-SCPI extensions | do not rely on them for portability |
+
 ## Device Info
 
 - Scope IP: `192.168.30.105`, web password `12345678`
@@ -105,20 +155,63 @@ sc.close()
 
 Recommendation: raw socket on 5024 for automation in this project (matches the PowerShell helpers above and `scope_lab.py`); PyVISA VXI-11 only as a cross-check on a healthy scope.
 
+### HTTP SCPI proxy (backup channel)
+
+The web server also exposes an **unauthenticated** HTTP SCPI proxy. It routes to the same instrument
+app as 5024, so it dies with an app wedge — it is a convenience channel, not a recovery channel.
+
+```
+POST http://192.168.30.105/device_read_write.php
+Body: cmd={"cmd":"*idn?","type":"ds","to":"127.0.0.1"}&action=excutescpicmds
+Response: {"success":true}\r\n{"retCount":1}\r\n{"cmdrslt":"<scpi response>","from":"127.0.0.1"}
+```
+
+PowerShell gotcha: set `[System.Net.ServicePointManager]::Expect100Continue = $false` first, or the
+embedded web server rejects the request with `417 Expectation Failed`.
+
+Web endpoints found after password login to `/login.php`: `/welcome.php`, `/lan.php`,
+`/lan_setting.php`, `/SCPI_control.php` (web SCPI console), `/wifi.php`,
+`/Instrument/novnc/vnc_auto.php`. There is **no** remote reboot endpoint.
+
+
 ## Measurement Commands
 
 Enable a measurement before reading it. Use one channel per connection to avoid scope hangs.
 
 ```
-C1:MEAS FREQ,ON      # enable frequency measurement on C1
-C1:PAVA? FREQ        # read  -> C1:PAVA FREQ,2.50E+04Hz
-C1:MEAS DUTY,ON      # enable duty cycle
-C1:PAVA? DUTY        # read  -> C1:PAVA DUTY,9.48E+01%
+C1:MEAS FREQ,ON       # enable measurement type on C1
+C1:PAVA? FREQ         # read -> C1:PAVA FREQ,2.50E+04Hz
+C1:MEAS DUTY,ON
+C1:PAVA? DUTY         # read -> C1:PAVA DUTY,9.48E+01%
+C1:MEAS PKPK,ON       # NOTE: peak-to-peak is PKPK, NOT VPP
+C1:PAVA? PKPK         # read -> C1:PAVA PKPK,1.40E+00V
 ```
 
-Working params: `FREQ`, `DUTY`, `PER`, `PKPK`, `RMS`, `MAX`, `MIN`, `RISE`, `FALL`. Params `VPP`, `VRMS`, `VMAX`, `VMIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `VAVG` return empty via SCPI (use `PKPK`/`RMS`/`MAX`/`MIN` instead). Run `python scripts\scope_lab.py params` after recovery to confirm the full type matrix — it walks every `:MEASure:SIMPle:ITEM` type plus the known-bad names and reports WORKS/EMPTY. See the Measurements section below for details.
+**Working measurement parameters (confirmed on SDS2204X HD):**
+| Param | Description | Example |
+|-------|-------------|---------|
+| `FREQ` | Frequency | 2.50E+04 Hz |
+| `DUTY` | Duty cycle | 9.48E+01 % |
+| `PER` | Period | 4.00E-05 s |
+| `PKPK` | Peak-to-peak voltage | 1.40E+00 V |
+| `RMS` | RMS voltage | 1.24E+00 V |
+| `MAX` | Maximum voltage | 1.26E+00 V |
+| `MIN` | Minimum voltage | -1.42E-01 V |
+| `RISE` | Rise time (10%-90%) | 4.30E-09 s |
+| `FALL` | Fall time (90%-10%) | 4.70E-09 s |
 
-Response values use scientific notation: `2.50E+04` = 25000, `9.48E+01` = 94.8. No signal returns `****` or empty.
+**Parameters that return EMPTY via SCPI** (use alternatives):
+`VPP`→`PKPK`, `VRMS`→`RMS`, `VMAX`→`MAX`, `VMIN`→`MIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`,
+`OVER`, `PRES`, `VAVG`, `AVG`. The on-screen panel shows VTOP/VBASE/AMP/PW/NW but they cannot be read
+via `PAVA?`. Workaround paths: `MEAS:ADV:P<n>:TYPE` + `MEAS:ADV:P<n>:VALue?`, or
+`MEAS:SIMP:SOUR C1` + `MEAS:SIMP:ITEM <type>,ON` + `MEAS:SIMP:VAL? <type>`.
+Run `python scripts\scope_lab.py params` after recovery to confirm the full type matrix — it walks
+every `:MEASure:SIMPle:ITEM` type plus the known-bad names and reports WORKS/EMPTY.
+
+**Notes:**
+- `PAVA?` requires the `?` before the parameter. `PAVA` (no `?`) returns empty.
+- Response values use scientific notation: `2.50E+04` = 25000, `9.48E+01` = 94.8. No signal returns `****` or empty.
+- `MEAS?` returns the global measurement state (`ON`/`OFF`).
 
 ## Scope Configuration Commands
 
@@ -408,22 +501,7 @@ TRIG:NEDG:LEV 0.5         # trigger level (V), range ±(4.1*VDIV-OFST)
 TRIG:NEDG:NREJ ON         # noise reject ON|OFF
 ```
 
-**SCPI server hang warning:** Do NOT send `ASET` and immediately close the TCP connection — the scope's SCPI server (port 5024) can hang while ASET is processing, refusing new connections (web UI on port 80 stays alive). Wait for ASET to complete (~3-5s, poll `*OPC?`) before disconnecting. If hung, wait several minutes or power-cycle the scope. Note: when the instrument app wedges, BOTH raw 5024 and the HTTP proxy backend report "Device can not be connected" — only a power cycle (or long watchdog timeout) recovers.
-
-## Alternative Channel: HTTP SCPI Proxy
-The scope's web server exposes an **unauthenticated** HTTP SCPI proxy — useful as a backup channel or for simple scripts without raw sockets:
-
-```
-POST http://192.168.30.105/device_read_write.php
-Body: cmd={"cmd":"*idn?","type":"ds","to":"127.0.0.1"}&action=excutescpicmds
-Response: {"success":true}\r\n{"retCount":1}\r\n{"cmdrslt":"<scpi response>","from":"127.0.0.1"}
-```
-
-PowerShell gotcha: set `[System.Net.ServicePointManager]::Expect100Continue = $false` first, or the embedded web server rejects the request with `417 Expectation Failed`. The proxy routes to the same instrument app as port 5024, so it is equally affected by app-level hangs.
-
-Discovered web UI endpoints (after password login to `/login.php`): `/welcome.php`, `/lan.php`, `/lan_setting.php`, `/SCPI_control.php` (web SCPI console), `/wifi.php`, `/Instrument/novnc/vnc_auto.php`. No remote reboot endpoint exists on the web server; use SCPI `SYST:REB` to reboot when the SCPI server is alive.
-
-### Auto Setup
+## Auto Setup
 ```
 ASET                  # auto-configure timebase, voltage scale, and trigger for the active signal
 ```
@@ -431,43 +509,7 @@ ASET is the fastest way to get a stable display. After ASET, fine-tune VDIV and 
 Per the manual (p.23) the official command is `:AUToset` (short `AUT`); `ASET` is also accepted by
 this firmware. Autoset is **not recommended for signals below 100 Hz**.
 
-### Measurements
-```
-C1:MEAS FREQ,ON       # enable measurement type on C1
-C1:PAVA? FREQ         # read -> C1:PAVA FREQ,2.50E+04Hz
-C1:PAVA? DUTY         # read -> C1:PAVA DUTY,9.48E+01%
-C1:PAVA? PER          # read -> C1:PAVA PER,4.00E-05s
-C1:MEAS PKPK,ON       # NOTE: peak-to-peak is PKPK, NOT VPP
-C1:PAVA? PKPK         # read -> C1:PAVA PKPK,1.40E+00V
-C1:PAVA? RMS          # read -> C1:PAVA RMS,1.24E+00V
-C1:PAVA? MAX          # read -> C1:PAVA MAX,1.26E+00V
-C1:PAVA? MIN          # read -> C1:PAVA MIN,-1.42E-01V
-C1:MEAS RISE,ON       # rise time
-C1:PAVA? RISE         # read -> C1:PAVA RISE,4.30E-09s
-C1:MEAS FALL,ON       # fall time
-C1:PAVA? FALL         # read -> C1:PAVA FALL,4.70E-09s
-```
-
-**Working measurement parameters (confirmed on SDS2204X HD):**
-| Param | Description | Example |
-|-------|-------------|---------|
-| `FREQ` | Frequency | 2.50E+04 Hz |
-| `DUTY` | Duty cycle | 9.48E+01 % |
-| `PER` | Period | 4.00E-05 s |
-| `PKPK` | Peak-to-peak voltage | 1.40E+00 V |
-| `RMS` | RMS voltage | 1.24E+00 V |
-| `MAX` | Maximum voltage | 1.26E+00 V |
-| `MIN` | Minimum voltage | -1.42E-01 V |
-| `RISE` | Rise time (10%-90%) | 4.30E-09 s |
-| `FALL` | Fall time (90%-10%) | 4.70E-09 s |
-
-**Parameters that return EMPTY via SCPI** (use alternatives):
-`VPP`→use `PKPK`, `VRMS`→use `RMS`, `VMAX`→use `MAX`, `VMIN`→use `MIN`, `VTOP`, `VBASE`, `AMP`, `PW`, `NW`, `OVER`, `PRES`, `VAVG`, `AVG`. The on-screen display shows VTOP/VBASE/AMP/PW/NW but they cannot be read via `PAVA?`. Candidate workaround (unverified): read them through the advanced measurement system (`MEAS:ADV:P<n>:TYPE` + `MEAS:ADV:P<n>:VALue?`) or the simple-mode path (`MEAS:SIMP:ITEM` + `MEAS:SIMP:VALue?`) — see "Advanced Measurement" section.
-
-**Notes:**
-- `PAVA?` requires the `?` before the parameter. `PAVA` (no `?`) returns empty.
-- Peak-to-peak parameter is `PKPK`, not `VPP`.
-- `MEAS?` returns global measurement state (`ON`/`OFF`).
+**SCPI server hang warning:** Do NOT send `ASET` and immediately close the TCP connection — the scope's SCPI server (port 5024) can hang while ASET is processing, refusing new connections (web UI on port 80 stays alive). Wait for ASET to complete (~3-5s, poll `*OPC?`) before disconnecting. If hung, wait several minutes or power-cycle the scope. Note: when the instrument app wedges, BOTH raw 5024 and the HTTP proxy backend report "Device can not be connected" — only a power cycle (or long watchdog timeout) recovers.
 
 ## Invalid / Misleading Commands
 
@@ -477,35 +519,6 @@ C1:PAVA? FALL         # read -> C1:PAVA FALL,4.70E-09s
 - `C1:PROB?`, `C1:VIS?` — short form returns empty; must use full `:CHAN1:PROB?` / `:CHAN1:VIS?`
 - `C1:IMP?` — impedance query returns empty (SDS2204X HD is 1MΩ only, no 50Ω option)
 - `DISP:PERS ON` — accepted but `DISP:PERS?` still returns OFF (persistence may not be controllable via SCPI)
-
-## Programming-Guide Audit (2026-11-10, offline)
-
-Every command in `scope_lab.py` was cross-checked against the 757-page SDS Programming Guide.
-Findings that change how you write commands:
-
-| Topic | Wrong / assumed | Correct (per manual) |
-|---|---|---|
-| WGEN prefix | `WGEN:BSWV`, `WGEN:OUTP` | SDG-style with channel prefix: `C1:BSWV`, `C1:OUTP`, `C1:SYNC`, `C1:ARWV`, `STL?`, `VOLTPRT` (p.681) |
-| Setup save/recall | `SAVE:SETup "local/name"` | `SAVE:SET INT,<1-10>` or `SAVE:SET EXT,"local/xxx.xml"`; likewise `REC:SET INT,1` (pp.313,328) |
-| Grid style | `DISP:GRIDS LIGH` | `DISP:GRID LIGH` — `:DISPlay:GRIDstyle` with {FULL\|LIGHt\|NONE} (p.194) |
-| Cursor instantaneous delta | `CURS:IXDEL?` | query-only `CURS:IXD?` (`:CURSor:IXDelta?`, p.57) |
-| Reference display | `REFA ON` | no such command; `REFA:DATA SAVE,C1` / `REFA:DATA LOAD` / `REFA:DATA UNLoad` (p.317) |
-| Intensity | `DISP:INT 75,100` | single value: `DISP:INT 75` (p.195) |
-| Simple measurement | `MEAS:SIMP:ITEM PWID,C1` / `MEAS:SIMP:VALue?` | `MEAS:SIMP:SOUR C1`, `MEAS:SIMP:ITEM PWID,ON`, `MEAS:SIMP:VAL? PWID` (pp.278-280) |
-| Decode protocol | `DEC:BUS1:TYPE UART` | `DEC:BUS1:PROT UART` (`:DECode:BUS<n>:PROTocol`, p.78) |
-| Save waveform | `SAVE:WAV C1` | no such command; `SAVE:BIN "path.bin",C1` / `SAVE:CSV "path.csv",C1,ON` / `SAVE:REF "path.ref",C1` (pp.322-328) |
-
-Firmware aliases (accepted by this unit, different from manual naming):
-- `C1:VDIV` = `:CHANnel<n>:SCALe`; `C1:OFST` = `:CHANnel<n>:OFFSet`; `C1:CPL` = `:CHANnel<n>:COUPling` (manual short form is `CHAN1:COUP`).
-- `FUNC1:OFST` = `:FUNCtion<n>:POSition`.
-- `SEAR:NAV NEXT|PREV` and `SYST:ERR?` are not in the Programming Guide at all — treat as unverified firmware/standard-SCPI extensions.
-
-Firmware extensions **not present in the Programming Guide** (verified working on this unit, but do
-not assume portability to other Siglent models):
-- `C1:MEAS <param>,ON` and `C1:PAVA? <param>` — the documented equivalents are
-  `MEAS:SIMP:ITEM/VAL?` and `MEAS:ADV:P<n>:*`. PAVA is the fastest read path on this firmware.
-
-Manual typos found: p.421 prints `TRIG:SIOP:LIM LESS` (real key is `TRIG:SLOP:LIM`).
 
 ## SCPI Response Format Note
 
@@ -856,19 +869,29 @@ REC:REF REFD,"U-disk0/SIGLENT/math.ref"     # recall .ref waveform file into REF
 REC:SER                   # delete ALL user files inside scope (refs, setups, masks, defaults) - destructive
 ```
 
-## Screenshot via SCPI (Preferred Over Browser Automation)
+## Screenshots (high-risk, attended only)
 
-`PRIN?` captures the scope screen and returns image bytes directly over the SCPI socket (Programming Guide p22, p755). This replaces the fragile browser ScreenShot + Save-As dialog workflow.
+> **Read the "Safety first" section above before using anything here.** A screenshot can raise a
+> modal *save* dialog on the instrument's own screen, which blocks the whole instrument app and is
+> unrecoverable over the network. Only screenshot when a person is standing next to the scope.
+
+`PRIN?` captures the scope screen and returns image bytes directly over the SCPI socket
+(Programming Guide p22, p755):
 
 ```
 PRIN? BMP               # screen dump as BMP (returns raw image bytes)
 PRIN? PNG               # screen dump as PNG
 ```
 
-- Response is raw binary image data (read raw bytes until stream end; expect a leading `0x00` byte — strip it before writing to file).
-- Python/VISA example from the manual (p755): set `chunk_size = 20*1024*1024`, `write("PRIN? BMP")`, `read_raw()`, write bytes to file.
-- Also `:SAVE:IMAGe "<path>",<BMP|JPG|PNG>,<OFF|ON>` saves a screenshot to scope storage (`local/...`, `U-disk0/...`, or `net_storage/...`; invert flag ON = white background for printing).
-- `:SAVE:MATLab "<path>",C1` saves channel waveform data as .mat to scope storage.
+- Response is raw binary image data (read raw bytes until stream end; expect a leading `0x00` byte —
+  strip it before writing to file; the trailing `>>` prompt must be trimmed too).
+- Manual example (p755): `chunk_size = 20*1024*1024`, `write("PRIN? BMP")`, `read_raw()`, write bytes.
+- `:SAVE:IMAGe "<path>",<BMP|JPG|PNG>,<OFF|ON>` writes the screenshot to scope storage
+  (`local/...`, `U-disk0/...`, `net_storage/...`; invert ON = white background for printing).
+- `:SAVE:MATLab "<path>",C1` saves channel waveform data as `.mat` to scope storage.
+- **Numeric alternative (safe, use this when unattended):** `C1:PAVA? FREQ/DUTY/PER/PKPK` plus
+  `WAV:DATA?` give the same information without touching the UI. `scope_lab.py params` exists for
+  exactly this reason.
 
 ## System Power Commands
 
@@ -969,7 +992,10 @@ C1:OUTP ON
 Note: WGEN amplitude/offset accuracy depends on load setting (50 vs HZ) — set `LOAD,HZ` when probing with a 10X probe into the 1MΩ scope input.
 
 
-## Decode (Serial Protocol)
+## Decode (Serial Protocol) & Serial Triggers
+Global decode control plus the serial *trigger* variants. Per-protocol decode configuration for all
+15 protocols is in "Decode Protocol Reference" below.
+
 Two decode buses (BUS1/BUS2). Protocol syntax per Programming Guide pp.70–120 (manual-exact, field-verified where noted).
 ```
 DEC ON                      # enable decode function (query: DEC?)
@@ -1213,17 +1239,25 @@ MTES OFF                  # disable
 ```
 Useful for long-run PWM stability soak: leave mask test running on a 25 kHz PWM channel, then read `MTES:COUN?`.
 
-## Acquisition Modes (ACQuire)
+## Acquisition Modes (ACQuire, manual pp.25–38)
 ```
 ACQ:MODE YT               # display mode: YT | XY (Lissajous) | ROLL (strip chart for slow signals)
+ACQ:TYPE NORMal           # NORMal | PEAK | AVERage[,times] | ERES[,bits]
+                          #   AVERage times: 4|16|32|64|128|256|512|1024
+                          #   ERES bits: 0.5|1.0|1.5|2.0|2.5|3.0 (not available with SEQuence ON)
 ACQ:AMOD FAST             # capture rate: FAST (high wfms/s, catches anomalies) | SLOW
-ACQ:MDEPth 12.5M          # memory depth (model-dependent; also 125M etc.)
-ACQ:POIN 1E5              # acquisition points
-ACQ:MMAN FMDepth          # memory management: FMDepth (fixed) | AMDepth (auto)
-ACQ:INT ON                # interpolation ON|OFF
+ACQ:MDEPth 200M           # single-ch {20k|200k|2M|20M|200M}; dual-ch {10k|100k|1M|10M|100M}
+ACQ:MMAN FMDepth          # memory mgmt: AUTO (max rate) | FSRate (fixed rate) | FMDepth (fixed depth)
+ACQ:SRAT 5.00E9           # fixed sample rate (FSRate mode), auto-clamped
+ACQ:INT ON                # sinx/x interpolation ON | linear OFF
+ACQ:RES 10Bits            # ADC resolution: 8Bits | 10Bits
+ACQ:SEQuence ON           # segmented memory
+ACQ:SEQuence:COUNt 100    # segments (max depends on depth/timebase)
+ACQ:POIN?                 # sample points of current waveform -> 1.25E+08
 ACQ:NUMA?                 # acquisitions since last setting change -> 350
 ACQ:CSW                   # clear sweep
 ```
+Short form: `ACQ`.
 
 ## System / Error
 ```
@@ -1317,67 +1351,60 @@ CURS OFF
 
 CH3 (pump) and CH4 (fan) often show 25 kHz crosstalk from the LED PWM traces even when fan/pump are off. To confirm crosstalk: turn the light off (`GET .../light?devicepwd=pengping&mode=set&onOffStatus=0`), wait 3 s, re-measure. If the signal disappears, it is crosstalk, not real PWM output.
 
-## Web VNC Screenshot
+## Browser / VNC Screenshot (fallback, attended only)
 
-**Prefer `PRIN? PNG` over any browser workflow** — see "Screenshot via SCPI" above. The noVNC/browser methods below are fallbacks for when the SCPI channel is unavailable but the web UI is alive.
+Only when `PRIN?` is unusable **and** someone is at the machine. The scope's **ScreenShot** toolbar
+button produces a full-resolution 1024×600 native capture (`ScreenImg.png`) including the measurement
+panel, readout bar and trigger settings.
 
-To capture a screenshot of the live scope display, use the noVNC web interface.
+> **Confirmed wedge cause (2026-11-10):** that button raises a modal *save screenshot* dialog on the
+> instrument's own screen. Unattended, the dialog stays open and the instrument app blocks: SCPI
+> 5024/5025 stop accepting connections and VNC freezes. There is no remote way to press Enter — the
+> only exits are pressing Enter/Save on the touchscreen or a physical power cycle. Never press it
+> remotely without a human present. This is the single most dangerous operation in this document.
 
-**Do NOT** click the "Instrument Control" sidebar link on `welcome.php` — it does not reliably load the VNC view in automated browsers (the page stays on the Instrument Information panel).
+VNC view (observation is safe):
+- Open `http://192.168.30.105/Instrument/novnc/vnc_auto.php` directly. Do **not** click
+  "Instrument Control" in `welcome.php` — it often leaves you on the Instrument Information panel.
+- Password `12345678`; the WebSocket takes 5–10 s to paint. Read-only viewing is fine; key/mouse
+  injection over VNC is not a recovery path (see the wedge section).
+- The VNC URL comes from `js/main.js` (`zone_device_control` → `vnc_auto.php`).
 
-**Do** navigate directly to the VNC URL:
+If a Windows browser "Save As" dialog appears, a detached PowerShell watcher can dismiss it:
 
+```powershell
+$script = @'
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32 {
+    [DllImport("user32.dll")] public static extern IntPtr FindWindow(string c, string n);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+}
+"@
+$w = New-Object -ComObject wscript.shell
+$deadline = (Get-Date).AddSeconds(90)
+while ((Get-Date) -lt $deadline) {
+    $h = [Win32]::FindWindow("#32770", $null)
+    if ($h -ne [IntPtr]::Zero) {
+        [Win32]::SetForegroundWindow($h) | Out-Null
+        Start-Sleep -Milliseconds 400
+        $w.SendKeys("{ENTER}")
+        Start-Sleep -Milliseconds 800
+        if ([Win32]::FindWindow("#32770", $null) -eq [IntPtr]::Zero) { break }
+    }
+    Start-Sleep -Milliseconds 300
+}
+'@
+$tmp = "$env:TEMP\handle_save_dialog.ps1"
+$script | Out-File $tmp -Encoding UTF8
+Start-Process powershell.exe -ArgumentList "-ExecutionPolicy","Bypass","-File",$tmp -WindowStyle Hidden
 ```
-http://192.168.30.105/Instrument/novnc/vnc_auto.php
-```
 
-- If redirected to `login.php`, enter password `12345678`.
-- The noVNC WebSocket connection takes 5–10 s to establish; wait until the live scope screen (grid, waveforms, channel labels C1–C4) appears before taking the screenshot.
-- The VNC URL was discovered by reading `welcome.php` HTML, finding the `zone_device_control` click handler in `js/main.js`, which does `window.location.href = "/Instrument/novnc/vnc_auto.php"`.
-
-### Native Scope Screenshot (Recommended, More Comprehensive)
-
-The scope's bottom toolbar has a **ScreenShot** button that generates a full-resolution native screenshot (1024×600) including waveform area, measurement panel, readout bar, timebase, and trigger settings — far more informative than a browser page screenshot. The saved file defaults to `ScreenImg.png`.
-
-The browser opens a Windows "Save As" dialog. The browser agent cannot click system dialogs, so coordinate with PowerShell:
-
-1. Launch a detached PowerShell process that watches for the `#32770` dialog class and sends Enter:
-   ```powershell
-   $script = @'
-   Add-Type @"
-   using System;
-   using System.Runtime.InteropServices;
-   public class Win32 {
-       [DllImport("user32.dll")] public static extern IntPtr FindWindow(string c, string n);
-       [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-   }
-   "@
-   $w = New-Object -ComObject wscript.shell
-   $deadline = (Get-Date).AddSeconds(90)
-   while ((Get-Date) -lt $deadline) {
-       $h = [Win32]::FindWindow("#32770", $null)
-       if ($h -ne [IntPtr]::Zero) {
-           [Win32]::SetForegroundWindow($h) | Out-Null
-           Start-Sleep -Milliseconds 400
-           $w.SendKeys("{ENTER}")
-           Start-Sleep -Milliseconds 800
-           if ([Win32]::FindWindow("#32770", $null) -eq [IntPtr]::Zero) { break }
-       }
-       Start-Sleep -Milliseconds 300
-   }
-   '@
-   $tmp = "$env:TEMP\handle_save_dialog.ps1"
-   $script | Out-File $tmp -Encoding UTF8
-   Start-Process powershell.exe -ArgumentList "-ExecutionPolicy","Bypass","-File",$tmp -WindowStyle Hidden
-   ```
-2. Then have the browser agent click the **ScreenShot** button on the scope's bottom toolbar.
-3. The handler detects the dialog and sends Enter, saving the file to the browser's default download directory (typically `C:\Users\<user>\Downloads\ScreenImg.png`).
-
-> **Dialog handler reliability notes:**
-> - PowerShell `Start-Job` does NOT persist across separate Shell calls — always use `Start-Process` (or `cmd /c start powershell`) for the dialog handler.
-> - If `Start-Process powershell.exe -WindowStyle Hidden` fails silently, wrap with `Start-Process cmd.exe -ArgumentList "/c","powershell",...`.
-> - If Enter does not dismiss the dialog, try `Alt+S` (`$wshell.SendKeys("%s")`) which directly activates the "保存(S)" button.
-> - Always write a log file from the handler to verify it is actually running.
+> This watcher only sees **Windows** dialogs on the PC. It cannot dismiss a modal on the scope's own
+> screen — that dialog has no Windows window handle. Use `Start-Process` (not `Start-Job`) so the
+> watcher survives between shell calls; fall back to `Alt+S` if Enter does nothing; log to a file to
+> prove it is running.
 
 ## Stability Tips
 
@@ -1388,7 +1415,12 @@ The browser opens a Windows "Save As" dialog. The browser agent cannot click sys
 
 ## App Wedge Diagnosis & Recovery
 
-Observed 2026-11-10: the instrument app wedged (likely during an `ASET` + immediate disconnect); every SCPI path died while the Linux web server stayed up. Diagnosis checklist:
+**Root cause (confirmed by the operator on 2026-11-10, superseding the earlier ASET hypothesis):**
+running a screenshot made the scope raise a modal *save* dialog on its own screen, and the instrument
+app blocked behind it. SCPI 5024/5025 stopped accepting connections while the Linux web server stayed
+up. Every SCPI path died; the web UI stayed reachable but useless.
+
+Diagnosis checklist:
 
 | Probe | Healthy | Wedged app symptom |
 |-------|---------|--------------------|
@@ -1411,7 +1443,13 @@ action=excutescpicmds
 ```
 Web stack is lighttpd/1.4.35 + PHP/5.4.5. No reboot/restart endpoint exists (`/reboot`, `/restart`, `/system/reboot`, `/reboot.cgi`, `/cgi-bin/reboot` all 404), so HTTP cannot self-recover. PowerShell `Invoke-WebRequest` sends `Expect: 100-continue` and lighttpd answers **417**; use `curl.exe --data-urlencode` (or disable `ServicePoint.ExpectContinue`).
 
-**Recovery: physical power cycle only.** `SYSTem:REBoot` exists in SCPI but cannot be delivered (proxy reports device-not-connected; no reboot endpoint on the web server). VNC input cannot be delivered either: the RFB handshake completes (server even sends ServerInit) but no frame is ever painted, so the UI compositor is frozen with the SCPI app. When a wedge is suspected, confirm with the table above before blaming the network, then ask the user to power-cycle and poll port 5024 until it reopens (boot takes ~1–2 min).
+**Recovery: press Enter/Save on the touchscreen, or physically power-cycle.** Measured 2026-11-10
+during the wedge: only ports 80 and 111 answered (5024/5025/5900 refused); `SYSTem:REBoot` could not be
+delivered over any channel; `vncdotool` got `10061 connection refused`; `SendKeys("{ENTER}")` only
+targets Windows foreground windows, not the scope UI; `/reboot.php`, `/restart.php`, `/vnc.php` all
+returned 404. So there is no remote recovery. Confirm a wedge with the table above before blaming the
+network, then ask for a physical power cycle and poll 5024 until it reopens (boot ~1–2 min). If the
+dialog is still on screen, pressing Enter on the touchscreen is enough — no power cycle needed.
 
 ### Raw RFB probing (no VNC client needed)
 
@@ -1424,24 +1462,15 @@ A ~40-line RFB client is enough to fingerprint the scope: banner `RFB 003.008`, 
 # read width/height (4B), 16-byte pixel format, 4-byte name length + name.
 ```
 
-## Serial Bus Decode (DECode) Subsystem (manual pp.71–172)
+## Decode Protocol Reference (all 15 protocols, manual pp.71–172)
 
-Two independent decode buses (BUS1, BUS2). Enable the global decode switch, pick a protocol per bus, configure sources/thresholds, then read results as text.
+Per-protocol configuration only — global decode control, result reading and the serial *trigger*
+variants are in "Decode (Serial Protocol) & Serial Triggers" above.
 
-### Global & bus control
-```
-:DECode ON                  # master decode switch: ON|OFF
-:DECode:LIST D1             # on-screen result list: OFF|D1|D2
-:DECode:LIST:LINE 6         # list rows shown [1,7]
-:DECode:LIST:SCRoll 3       # selected list row
-:DECode:BUS1 ON             # per-bus switch: ON|OFF
-:DECode:BUS1:PROTocol IIC   # IIC|SPI|UART|CAN|LIN|FLEXray|CANFd|IIS|M1553
-:DECode:BUS1:FORMat HEX     # display format: BINary|DECimal|HEX|ASCii
-:DECode:BUS1:COPY FROMtrigger   # sync decode settings from trigger (TOTRigger = reverse)
-:DECode:BUS1:RESult?        # decoded frames as text; header row first, frames separated by ';'
-                             # e.g. "lin,sync,id,parity,data,checksum;\n0x55,0x06,0,0x54\s0x5F,0x46;"
-```
-Short form: `DEC`. Note CAN/LIN/FLEXray/CANFd/IIS/M1553 decode may require license options on some models.
+Two independent decode buses (BUS1, BUS2). Pick a protocol per bus, configure sources/thresholds,
+then read results with `:DECode:BUS<n>:RESult?`.
+
+> Short form is `DEC`. CAN/LIN/FLEXray/CANFd/IIS/M1553 decode may require a license option.
 
 ### Threshold rule (all protocols)
 Threshold range for SDS2000X HD: `[-4.1*VDIV - OFST, +4.1*VDIV - OFST]` (same clamp family as trigger level — verify with the `?` query after setting).
@@ -1540,30 +1569,37 @@ Threshold range for SDS2000X HD: `[-4.1*VDIV - OFST, +4.1*VDIV - OFST]` (same cl
 :DECode:BUS1:MANChester:BITorder MSB
 ```
 
-## Acquisition (ACQuire) Subsystem (manual pp.25–38)
+## Appendix A: Programming-guide audit (2026-11-10, offline)
 
-```
-:ACQuire:TYPE NORMal          # NORMal|PEAK|AVERage[,times]|ERES[,bits]
-                              #   AVERage times: 4|16|32|64|128|256|512|1024
-                              #   ERES bits: 0.5|1.0|1.5|2.0|2.5|3.0 (boxcar filter, less noise at slow sweeps)
-                              #   NOTE: AVERage/ERES not available when SEQuence is ON
-:ACQuire:MODE YT              # YT|XY|ROLL (ROLL = strip-chart, for slow events)
-:ACQuire:MMANagement AUTO     # memory mgmt: AUTO (max sample rate) | FSRate (fixed rate) | FMDepth (fixed depth)
-:ACQuire:MDEPth 200M          # SDS2000X HD: single-ch {20k|200k|2M|20M|200M}, dual-ch {10k|100k|1M|10M|100M}
-                              #   reduced when digital ch on / AVERage/ERES / ROLL mode
-:ACQuire:SRATe 5.00E9         # fixed sample rate (FSRate mode); auto-clamped to settable value
-:ACQuire:AMODe FAST           # capture rate: FAST|SLOW (FAST helps catch anomalies)
-:ACQuire:INTerpolation ON     # ON = sinx/x (sinc), OFF = linear
-:ACQuire:RESolution 10Bits    # ADC bits: 8Bits|10Bits (SDS2000X Plus / HD)
-:ACQuire:SEQuence ON          # segmented memory mode (fast re-arm, capture bursts)
-:ACQuire:SEQuence:COUNt 100   # number of segments (max depends on depth/timebase)
-:ACQuire:CSWeep               # command only: clear sweeps & restart acquisition
-:ACQuire:NUMAcq?              # query: acquisitions since start (reset on setting change)
-:ACQuire:POINts?              # query: sample points of current waveform, e.g. 1.25E+08
-```
-Short form: `ACQ`.
+Every command in `scope_lab.py` and both measurement documents was cross-checked against the
+757-page SDS Programming Guide. Findings that change how you write commands:
 
-## Manual Coverage Audit
+| Topic | Wrong / assumed | Correct (per manual) |
+|---|---|---|
+| WGEN prefix | `WGEN:BSWV`, `WGEN:OUTP` | SDG-style with channel prefix: `C1:BSWV`, `C1:OUTP`, `C1:SYNC`, `C1:ARWV`, `STL?`, `VOLTPRT` (p.681) |
+| Setup save/recall | `SAVE:SETup "local/name"` | `SAVE:SET INT,<1-10>` or `SAVE:SET EXT,"local/xxx.xml"`; likewise `REC:SET INT,1` (pp.313,328) |
+| Grid style | `DISP:GRIDS LIGH` | `DISP:GRID LIGH` — `:DISPlay:GRIDstyle` with {FULL\|LIGHt\|NONE} (p.194) |
+| Cursor instantaneous delta | `CURS:IXDEL?` | query-only `CURS:IXD?` (`:CURSor:IXDelta?`, p.57) |
+| Reference display | `REFA ON` | no such command; `REFA:DATA SAVE,C1` / `REFA:DATA LOAD` / `REFA:DATA UNLoad` (p.317) |
+| Intensity | `DISP:INT 75,100` | single value: `DISP:INT 75` (p.195) |
+| Simple measurement | `MEAS:SIMP:ITEM PWID,C1` / `MEAS:SIMP:VALue?` | `MEAS:SIMP:SOUR C1`, `MEAS:SIMP:ITEM PWID,ON`, `MEAS:SIMP:VAL? PWID` (pp.278-280) |
+| Decode protocol | `DEC:BUS1:TYPE UART` | `DEC:BUS1:PROT UART` (`:DECode:BUS<n>:PROTocol`, p.78) |
+| Save waveform | `SAVE:WAV C1` | no such command; `SAVE:BIN "path.bin",C1` / `SAVE:CSV "path.csv",C1,ON` / `SAVE:REF "path.ref",C1` (pp.322-328) |
+
+Firmware aliases (accepted by this unit, different from manual naming):
+- `C1:VDIV` = `:CHANnel<n>:SCALe`; `C1:OFST` = `:CHANnel<n>:OFFSet`; `C1:CPL` = `:CHANnel<n>:COUPling`
+  (manual short form is `CHAN1:COUP`); `FUNC1:OFST` = `:FUNCtion<n>:POSition`.
+
+Firmware extensions **not present in the Programming Guide** (verified working on this unit; do not
+assume portability to other Siglent models):
+- `C1:MEAS <param>,ON` and `C1:PAVA? <param>` — documented equivalents are `MEAS:SIMP:ITEM/VAL?` and
+  `MEAS:ADV:P<n>:*`, but PAVA is the fastest read path on this firmware.
+- `*CLS`, `*STB?`, `*SAV`, `RCL`, `SYST:ERR?`, `SEAR:NAV` — standard-SCPI/firmware extras; treat as
+  unverified and prefer the documented `SAVE:SET` / `REC:SET`.
+
+Manual typos found: p.421 prints `TRIG:SIOP:LIM LESS` (real key is `TRIG:SLOP:LIM`).
+
+## Appendix B: Manual coverage audit
 
 The programming guide (757 pages) contains a 594-entry command index. On 2026-11-10 every index entry
 was cross-checked against this document by normalizing long/short forms (`:CHANnel<n>:BWLimit` ~ `CHAN1:BWL`).
@@ -1591,9 +1627,10 @@ Gaps found during the audit and fixed the same day: `DISP:GRAT` (grid brightness
 (max points per transfer piece), `FUNC<n>:FFT:HSCale?`, `CURS<n>:IXDelta?/XDELta?/YDELta?`
 (cursor deltas are queries only - move the cursors with `CURS:X1/X2/Y1/Y2`).
 
-## Wedge Diagnosis & Post-Recovery Runbook
+## Appendix C: Post-recovery runbook
 
-Observed 2026-11-10: the instrument application wedged while SCPI was idle-disconnected.
+Runs after the scope is powered back up. Symptoms and the wedge checklist live in
+"App Wedge Diagnosis & Recovery" above; this appendix is only the validation order.
 
 | Symptom | Meaning |
 |---|---|
@@ -1604,24 +1641,27 @@ Observed 2026-11-10: the instrument application wedged while SCPI was idle-disco
 | Port 5025 also refuses | confirms app-level, not port-level failure |
 
 No software recovery exists (no SYST:REBoot reachable, VXI-11 dead): **physically power-cycle the scope**, wait ~40 s, then re-test 5024.
-Nothing in the SCPI flow above caused the wedge — it appeared during a long idle period, so treat "SCPI stops answering" as an instrument-side fault first, client bug second.
+The wedge is caused by the screenshot save dialog (see "App Wedge Diagnosis & Recovery"), so treat
+"SCPI stops answering right after any screenshot" as an instrument-side modal block, not a client bug.
 
 Post-recovery validation order (each step must pass before the next):
 
 ```powershell
 python scripts\scope_lab.py idn       # *IDN?, TRIG:STAT?, ACQ:SRAT?
-python scripts\scope_lab.py single    # CH1 config -> SINGLE -> RUN -> poll Stop -> PRIN? PNG
-# Read $env:TEMP\scope_lab\single.png and confirm a 25 kHz PWM square wave is on screen
-python scripts\scope_lab.py pwm       # DUT /status vs measured FREQ/DUTY on C1..C4 + pwm.png
+python scripts\scope_lab.py pwm       # DUT /status vs measured FREQ/DUTY on C1..C4
 python scripts\scope_lab.py params    # PAVA type matrix -> WORKS / EMPTY lists
 python scripts\scope_lab.py runall    # ordered suite, appends to scope_lab\runall.log
-python scripts\scope_wait.py          # poll 5024 until the scope is back, then run idn+single+pwm
+python scripts\scope_wait.py          # poll 5024 until the scope is back, then run idn+pwm
 ```
+
+Screenshots are gated: `scope_lab.py` skips every `PRIN?` unless `SCOPE_ALLOW_SCREENSHOT=1` is set.
+Only set it with a person at the scope; then `python scripts\scope_lab.py single` also writes
+`$env:TEMP\scope_lab\single.png` for visual confirmation.
 
 `scripts/scope_wait.py` is the unattended recovery driver: it probes the SCPI port every 10 s
 (`--interval`), gives up after `--timeout` seconds if set, and on success runs `--suite`
-(default `idn,single,pwm`). Use it after a physical power-cycle so the whole closed-loop
-verification runs without further manual steps.
+(default `idn,pwm` — deliberately no screenshot). Use it after a physical power-cycle so the whole
+closed-loop verification runs without further manual steps.
 
 `scripts/scope_lab.py` (shipped with this skill) implements the raw-socket client, the PNG screenshot
 decoder and every experiment named here; `scripts/vnc_probe.py` performs the raw RFB handshake check.
