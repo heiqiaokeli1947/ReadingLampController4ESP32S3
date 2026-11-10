@@ -100,7 +100,7 @@ def exp_idn(sc):
 def exp_single(sc):
     """Single-trigger closed loop on CH1 (the task's core requirement)."""
     print("C1 setup:", sc.cmd("C1:TURN ON"), sc.cmd(":CHAN1:VIS ON"),
-          sc.cmd("C1:VDIV 0.5"), sc.cmd("C1:OFST 0"), sc.cmd("TDIV 1E-5"))
+          sc.cmd("C1:VDIV 2"), sc.cmd("C1:OFST 0"), sc.cmd("TDIV 1E-5"))
     print("trig cfg:", sc.cmd("TRIG:TYPE EDGE"), sc.cmd("TRIG:EDGE:SOUR CHAN1"),
           sc.cmd("TRIG:EDGE:SLOP POS"), sc.cmd("TRIG:EDGE:LEV 0.3"))
     print("LEV? ->", sc.cmd("TRIG:EDGE:LEV?"))
@@ -175,6 +175,8 @@ def exp_pwm(sc):
         print("probe map not configured (--channels / SCOPE_CHANNELS); assuming C1..C4 are connected")
 
     print(f"{'CH':<3}{'signal':<8}{'duty bound':<14}{'applied':<10}{'FREQ':<22}{'DUTY'}")
+    # 3.3V logic: 2 V/div gives 8 V full scale (4 divisions × 2), so 0..3.3V fits cleanly.
+    VDIV = "2"
     # NOTE: the scope drops the TCP connection when channels are switched on a single socket,
     # so each channel gets a fresh connection (one channel per connection).
     for ch, name, key in chans:
@@ -183,7 +185,7 @@ def exp_pwm(sc):
             chsc = Scope()
             chsc.cmd("TDIV 1E-5")
             chsc.cmd(f"{c}:TURN ON"); chsc.cmd(f":CHAN{ch}:VIS ON")
-            chsc.cmd(f"{c}:VDIV 0.5"); chsc.cmd(f"{c}:OFST 0")
+            chsc.cmd(f"{c}:VDIV {VDIV}"); chsc.cmd(f"{c}:OFST 0")
             chsc.cmd(f"{c}:MEAS FREQ,ON"); chsc.cmd(f"{c}:MEAS DUTY,ON")
             freq = chsc.cmd(f"{c}:PAVA? FREQ").split(",")[-1]
             duty = chsc.cmd(f"{c}:PAVA? DUTY").split(",")[-1]
@@ -340,7 +342,7 @@ def exp_mask(sc):
 def exp_fft(sc):
     """Math FFT chain (manual pp.210-230)."""
     for c in ["FUNC1 ON", "FUNC1:OPER FFT", "FUNC1:SOUR1 C1", "FUNC1:FFT:AUT NORM",
-              "FUNC:FFTD SPL", "C1:VDIV 0.5", "C1:OFST 0", "TDIV 1E-5"]:
+              "FUNC:FFTD SPL", "C1:VDIV 2", "C1:OFST 0", "TDIV 1E-5"]:
         print(f"{c} ->", sc.cmd(c))
     time.sleep(1.5)
     for c in ["FUNC1:FFT:HCEN?", "FUNC1:FFT:HSC?", "FUNC1:FFT:SPAN?",
