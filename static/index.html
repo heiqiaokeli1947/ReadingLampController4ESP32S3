@@ -50,8 +50,20 @@
         .btn-warning { background: #f39c12; color: #fff; }
         .btn-success { background: #27ae60; color: #fff; }
         .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-        .pwm-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-        @media (max-width: 600px) { .pwm-grid { grid-template-columns: 1fr 1fr; } }
+        .pwm-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .pwm-grid > div { min-width: 0; }
+        .pwm-grid input { width: 100%; box-sizing: border-box; }
+        .pwm-label { font-size: 0.75rem; }
+        @media (max-width: 600px) {
+            .pwm-grid { gap: 8px; }
+            .pwm-label { font-size: 0.68rem; white-space: nowrap; }
+            .pwm-grid input { padding: 6px 4px; font-size: 0.85rem; }
+        }
+        @media (max-width: 360px) {
+            .pwm-grid { gap: 5px; }
+            .pwm-label { font-size: 0.58rem; }
+            .pwm-grid input { padding: 5px 2px; font-size: 0.75rem; }
+        }
         .threshold-input { display: flex; gap: 10px; align-items: center; }
         .threshold-input input { flex: 1; }
         .chart-container { position: relative; height: 320px; }
@@ -500,11 +512,11 @@
             <div style="border:1px solid #eee;border-radius:6px;padding:10px">
                 <div style="font-weight:600;margin-bottom:6px">${ch.label}</div>
                 <div class="pwm-grid">
-                    <div><label style="font-size:0.75rem">频率 (Hz)</label>
+                    <div><label class="pwm-label">频率 (Hz)</label>
                         <input type="number" id="${ch.key}Freq" min="1" max="78125" value="25000"></div>
-                    <div><label style="font-size:0.75rem">最小占空比 (%)</label>
+                    <div><label class="pwm-label">最小占空比 (%)</label>
                         <input type="number" id="${ch.key}Min" min="0" max="100" value="15"></div>
-                    <div><label style="font-size:0.75rem">最大占空比 (%)</label>
+                    <div><label class="pwm-label">最大占空比 (%)</label>
                         <input type="number" id="${ch.key}Max" min="0" max="100" value="100"></div>
                 </div>
             </div>
