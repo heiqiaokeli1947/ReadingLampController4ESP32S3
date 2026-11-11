@@ -237,14 +237,14 @@ whenGotoConfigMode = 0
 
 
 def _sendStatic(request, filePath):
-    """支持 gzip 预压缩静态资源"""
+    """支持 gzip 预压缩静态资源；max_age=0 强制浏览器每次重新校验，避免改完页面仍显示旧缓存"""
     dirEnd = filePath.rfind('/')
     if 'gzip' in request.headers.get('Accept-Encoding', '') and \
             fileUtils.isFileExist(filePath[:dirEnd + 1],
                                   filePath[dirEnd + 1:] + '.gz'):
         log("send compressed file:{}".format(filePath))
-        return send_file(filePath, compressed=True, file_extension='.gz')
-    return send_file(filePath)
+        return send_file(filePath, compressed=True, file_extension='.gz', max_age=0)
+    return send_file(filePath, max_age=0)
 
 
 @app.route('/')
@@ -289,9 +289,9 @@ def handler(request):
         res["tempLM75_2"] = sd.tempLM75_2
         res["tempLM75_3"] = sd.tempLM75_3
         res.update(systemConfig)
-        # 密码类字段不下发：前端不依赖（WiFi 密码框留空重填、设备密码框为本地默认值），
-        # 避免任何持有 devicepwd 的客户端拿到 WiFi 密码/AP 密码明文
-        for _k in ("devicepwd", "wifipwd", "wifipwdDefault"):
+        # 密码类字段不下发：避免任何持有 devicepwd 的客户端拿到设备密码明文
+        # （WiFi 密码/AP 密码为设备自身配置，页面需 devicepwd 鉴权，允许回显）
+        for _k in ("devicepwd", "wifipwdDefault"):
             res.pop(_k, None)
         res.update(lightFSM.getStatus())
         res.update(fanFSMInstance.getStatus())
@@ -487,6 +487,35 @@ def handler(request):
     elif mode == "off":
         matrixAnim.stop()
         return ujson.dumps({"errCode": "0", "msg": "matrix off"})
+    elif mode == "update":
+        # 实时更新亮度/速度/颜色，不重启当前动画或滚动文本（滑动条/取色器变动时调用）
+        if "brightness" in request.args:
+            try:
+                brightness = max(0.01, min(1.0, float(request.args["brightness"])))
+                systemConfig["matrixBrightness"] = brightness
+                matrixAnim.update_params(brightness=brightness)
+            except ValueError:
+                pass
+        if "speed" in request.args:
+            try:
+                speed = max(1.0, min(100.0, float(request.args["speed"])))
+                systemConfig["matrixSpeed"] = speed
+                matrixAnim.update_params(speed=speed)
+            except ValueError:
+                pass
+        if "color" in request.args:
+            c = request.args["color"]
+            color = None
+            if c.startswith("#") and len(c) == 7:
+                try:
+                    color = (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16))
+                except ValueError:
+                    pass
+            if color is not None:
+                systemConfig["matrixColor"] = c
+                matrixAnim.update_params(color=color)
+        db.save({"systemConfig": ujson.dumps(systemConfig)})
+        return ujson.dumps({"errCode": "0", "msg": "matrix params updated"})
     return ujson.dumps({"errCode": "-1", "msg": "unsupported operation."})
 
 

@@ -289,6 +289,321 @@ class Wave(Animation):
                 matrix.set_xy(x, y, c)
 
 
+class Comet(Animation):
+    """彗星：明亮头部 + 渐隐拖尾，横向来回扫描。"""
+
+    def __init__(self, speed=0.02):
+        self.speed = speed
+        self.x = 0.0
+        self.dir = 1
+        self.t = 0.0
+
+    def update(self, dt_ms):
+        self.x += self.dir * self.speed * dt_ms
+        if self.x >= 7:
+            self.x = 7
+            self.dir = -1
+        elif self.x <= 0:
+            self.x = 0
+            self.dir = 1
+        self.t += dt_ms * 0.05
+
+    def draw(self, matrix):
+        matrix.fill((0, 0, 0))
+        h = (self.t * 10) % 360
+        head = int(round(self.x))
+        # 头部白色
+        matrix.set_xy(head, 3, (255, 255, 255))
+        matrix.set_xy(head, 4, (255, 255, 255))
+        # 拖尾
+        for i in range(1, 8):
+            tx = head - self.dir * i
+            if 0 <= tx < 8:
+                b = int(255 * (1 - i / 8))
+                c = WS2818Matrix.hsv_to_rgb(h, 1.0, 1.0)
+                matrix.set_xy(tx, 3, (int(c[0] * b / 255), int(c[1] * b / 255), int(c[2] * b / 255)))
+                matrix.set_xy(tx, 4, (int(c[0] * b / 255), int(c[1] * b / 255), int(c[2] * b / 255)))
+
+
+class Sparkle(Animation):
+    """星光闪烁：随机像素亮起并渐隐。"""
+
+    def __init__(self, count=12):
+        self.pixels = []
+        for _ in range(count):
+            self.pixels.append({"x": urandom.getrandbits(3), "y": urandom.getrandbits(3),
+                                 "hue": urandom.getrandbits(8) * 360 / 256,
+                                 "phase": urandom.getrandbits(8) / 256.0 * 6.28})
+
+    def update(self, dt_ms):
+        for p in self.pixels:
+            p["phase"] += dt_ms * 0.005
+
+    def draw(self, matrix):
+        matrix.fill((0, 0, 0))
+        for p in self.pixels:
+            v = (math.sin(p["phase"]) + 1) / 2  # 0~1
+            if v > 0.1:
+                b = int(v * 255)
+                c = WS2818Matrix.hsv_to_rgb(p["hue"], 1.0, 1.0)
+                matrix.set_xy(p["x"], p["y"], (int(c[0] * b / 255), int(c[1] * b / 255), int(c[2] * b / 255)))
+
+
+class Snake(Animation):
+    """贪吃蛇：蛇身沿蛇形路径游走，带渐隐拖尾。"""
+
+    def __init__(self, speed=0.015):
+        self.speed = speed
+        self.pos = 0
+        self.segments = []
+        self.reset()
+
+    def reset(self):
+        self.pos = 0
+        self.segments = [0]
+
+    def update(self, dt_ms):
+        self.pos += self.speed * dt_ms
+        idx = int(self.pos)
+        if idx >= 64:
+            self.pos = 0
+            idx = 0
+        self.segments.append(idx)
+        if len(self.segments) > 8:
+            self.segments.pop(0)
+
+    def _idx_to_xy(self, idx):
+        row = idx // 8
+        col = idx % 8
+        if row % 2 == 1:
+            col = 7 - col
+        return col, row
+
+    def draw(self, matrix):
+        matrix.fill((0, 0, 0))
+        for i, s in enumerate(self.segments):
+            x, y = self._idx_to_xy(s)
+            b = int(255 * (i + 1) / len(self.segments))
+            h = (s * 6) % 360
+            c = WS2818Matrix.hsv_to_rgb(h, 1.0, 1.0)
+            matrix.set_xy(x, y, (int(c[0] * b / 255), int(c[1] * b / 255), int(c[2] * b / 255)))
+
+
+class Starburst(Animation):
+    """星爆：从中心向外辐射的光线，旋转。"""
+
+    def __init__(self, rays=6, speed=0.003):
+        self.rays = rays
+        self.speed = speed
+        self.t = 0.0
+
+    def update(self, dt_ms):
+        self.t += dt_ms * self.speed
+
+    def draw(self, matrix):
+        matrix.fill((0, 0, 0))
+        t = self.t
+        for y in range(8):
+            for x in range(8):
+                dx = x - 3.5
+                dy = y - 3.5
+                if dx == 0 and dy == 0:
+                    matrix.set_xy(x, y, (255, 255, 255))
+                    continue
+                angle = math.atan2(dy, dx) + t
+                dist = (dx * dx + dy * dy) ** 0.5
+                v = math.sin(angle * self.rays) * math.sin(dist * 0.8 - t * 5)
+                if v > 0:
+                    h = (angle * 60 + t * 50) % 360
+                    b = int(v * 255)
+                    c = WS2818Matrix.hsv_to_rgb(h, 1.0, 1.0)
+                    matrix.set_xy(x, y, (int(c[0] * b / 255), int(c[1] * b / 255), int(c[2] * b / 255)))
+
+
+class Checkerboard(Animation):
+    """棋盘格：颜色随时间循环的国际象棋棋盘。"""
+
+    def __init__(self, speed=0.05):
+        self.speed = speed
+        self.t = 0.0
+
+    def update(self, dt_ms):
+        self.t += dt_ms * self.speed
+
+    def draw(self, matrix):
+        for y in range(8):
+            for x in range(8):
+                if (x + y) % 2 == 0:
+                    h = self.t % 360
+                    matrix.set_xy(x, y, WS2818Matrix.hsv_to_rgb(h, 1.0, 1.0))
+                else:
+                    h = (self.t + 180) % 360
+                    matrix.set_xy(x, y, WS2818Matrix.hsv_to_rgb(h, 1.0, 1.0))
+
+
+class Cyclon(Animation):
+    """赛隆之眼：一个发光点来回扫描，带辉光拖尾。"""
+
+    def __init__(self, speed=0.025):
+        self.speed = speed
+        self.x = 0.0
+        self.dir = 1
+        self.t = 0.0
+
+    def update(self, dt_ms):
+        self.x += self.dir * self.speed * dt_ms
+        if self.x >= 7:
+            self.x = 7
+            self.dir = -1
+        elif self.x <= 0:
+            self.x = 0
+            self.dir = 1
+        self.t += dt_ms
+
+    def draw(self, matrix):
+        matrix.fill((0, 0, 0))
+        cx = int(round(self.x))
+        for x in range(8):
+            dist = abs(x - cx)
+            b = max(0, int(255 * (1 - dist / 4)))
+            if b > 10:
+                matrix.set_xy(x, 3, (b, 0, 0))
+                matrix.set_xy(x, 4, (b, 0, 0))
+                if dist == 0:
+                    matrix.set_xy(x, 3, (255, 100, 100))
+                    matrix.set_xy(x, 4, (255, 100, 100))
+
+
+class Spiral(Animation):
+    """旋转螺旋：从中心向外的螺旋线随时间旋转。"""
+
+    def __init__(self, speed=0.004):
+        self.speed = speed
+        self.t = 0.0
+
+    def update(self, dt_ms):
+        self.t += dt_ms * self.speed
+
+    def draw(self, matrix):
+        matrix.fill((0, 0, 0))
+        t = self.t
+        for y in range(8):
+            for x in range(8):
+                dx = x - 3.5
+                dy = y - 3.5
+                dist = (dx * dx + dy * dy) ** 0.5
+                angle = math.atan2(dy, dx)
+                v = math.sin(dist * 1.5 - angle * 2 + t * 10)
+                if v > 0.3:
+                    h = (dist * 40 + t * 50) % 360
+                    b = int((v - 0.3) / 0.7 * 255)
+                    c = WS2818Matrix.hsv_to_rgb(h, 1.0, 1.0)
+                    matrix.set_xy(x, y, (int(c[0] * b / 255), int(c[1] * b / 255), int(c[2] * b / 255)))
+
+
+class Fire(Animation):
+    """火焰：底部上升的火焰效果，红橙黄渐变。"""
+
+    def __init__(self, speed=0.05):
+        self.speed = speed
+        self.t = 0.0
+        self.heat = [[0.0] * 8 for _ in range(8)]
+
+    def update(self, dt_ms):
+        self.t += dt_ms * self.speed
+        # 底部加热
+        for x in range(8):
+            self.heat[7][x] = urandom.random() * 0.8 + 0.2
+        # 向上传播并冷却
+        for y in range(7):
+            for x in range(8):
+                spread = (self.heat[y + 1][(x - 1) & 7] + self.heat[y + 1][x] +
+                          self.heat[y + 1][(x + 1) & 7]) / 3
+                self.heat[y][x] = max(0.0, spread - 0.08)
+
+    def draw(self, matrix):
+        for y in range(8):
+            for x in range(8):
+                h = self.heat[y][x]
+                if h < 0.05:
+                    matrix.set_xy(x, y, (0, 0, 0))
+                elif h < 0.3:
+                    matrix.set_xy(x, y, (int(h * 850), 0, 0))  # 暗红
+                elif h < 0.6:
+                    matrix.set_xy(x, y, (255, int((h - 0.3) * 600), 0))  # 橙
+                else:
+                    matrix.set_xy(x, y, (255, 180 + int((h - 0.6) * 200), int((h - 0.6) * 600)))  # 黄白
+
+
+class Heartbeat(Animation):
+    """心跳：心形图案以心跳节奏跳动。"""
+
+    _HEART = [
+        (2, 1), (3, 1), (4, 1), (5, 1),
+        (1, 2), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2),
+        (1, 3), (2, 3), (3, 3), (4, 3), (5, 3), (6, 3),
+        (2, 4), (3, 4), (4, 4), (5, 4),
+        (3, 5), (4, 5),
+        (3, 6), (4, 6),
+    ]
+
+    def __init__(self, period=1000):
+        self.period = period
+        self.t = 0
+
+    def update(self, dt_ms):
+        self.t = (self.t + dt_ms) % self.period
+
+    def draw(self, matrix):
+        matrix.fill((0, 0, 0))
+        # 双跳心跳曲线
+        phase = self.t / self.period
+        if phase < 0.15:
+            s = phase / 0.15
+        elif phase < 0.3:
+            s = 1 - (phase - 0.15) / 0.15
+        elif phase < 0.4:
+            s = 0.3
+        elif phase < 0.5:
+            s = 0.3 + (phase - 0.4) / 0.1 * 0.7
+        elif phase < 0.6:
+            s = 1 - (phase - 0.5) / 0.1
+        else:
+            s = 0.2
+        b = int(255 * s)
+        for (x, y) in self._HEART:
+            matrix.set_xy(x, y, (b, 0, int(b * 0.3)))
+
+
+class Rings(Animation):
+    """涟漪环：从中心向外扩散的同心圆环。"""
+
+    def __init__(self, speed=0.02):
+        self.speed = speed
+        self.t = 0.0
+
+    def update(self, dt_ms):
+        self.t += dt_ms * self.speed
+
+    def draw(self, matrix):
+        matrix.fill((0, 0, 0))
+        t = self.t
+        for y in range(8):
+            for x in range(8):
+                dx = x - 3.5
+                dy = y - 3.5
+                dist = (dx * dx + dy * dy) ** 0.5
+                # 多个环以不同速度扩散
+                v1 = math.sin(dist * 1.5 - t * 6)
+                v2 = math.sin(dist * 1.0 - t * 4 + 2)
+                v = max(v1, v2)
+                if v > 0.5:
+                    h = (dist * 50 + t * 30) % 360
+                    b = int((v - 0.5) / 0.5 * 255)
+                    c = WS2818Matrix.hsv_to_rgb(h, 1.0, 1.0)
+                    matrix.set_xy(x, y, (int(c[0] * b / 255), int(c[1] * b / 255), int(c[2] * b / 255)))
+
+
 class ScrollText(Animation):
     """文本滚动：5x8 字符，从右向左循环滚动。"""
 
@@ -351,6 +666,16 @@ class MatrixAnim:
         "rain": Rain,
         "matrix": MatrixRain,
         "wave": Wave,
+        "comet": Comet,
+        "sparkle": Sparkle,
+        "snake": Snake,
+        "starburst": Starburst,
+        "checkerboard": Checkerboard,
+        "cyclon": Cyclon,
+        "spiral": Spiral,
+        "fire": Fire,
+        "heartbeat": Heartbeat,
+        "rings": Rings,
     }
 
     def __init__(self, matrix, fps=24, brightness=0.7):
@@ -382,6 +707,22 @@ class MatrixAnim:
         self._current = None
         self.matrix.clear()
         self.matrix.show()
+
+    def update_params(self, brightness=None, speed=None, color=None):
+        """实时更新亮度/速度/颜色，不重启当前动画或滚动文本。
+        - brightness 同时写入矩阵驱动（所有动画共用）和 ScrollText 内部缓存
+        - speed 仅对具备 speed 属性的动画生效（ScrollText 及大部分内置动画）
+        - color 仅对 ScrollText 生效（内置动画有各自配色，不响应外部颜色）"""
+        if brightness is not None:
+            self.matrix.brightness = brightness
+            if self._anim is not None and hasattr(self._anim, 'brightness'):
+                self._anim.brightness = brightness
+        if speed is not None:
+            if self._anim is not None and hasattr(self._anim, 'speed'):
+                self._anim.speed = speed
+        if color is not None:
+            if self._anim is not None and hasattr(self._anim, 'color'):
+                self._anim.color = color
 
     def run(self):
         """主循环每轮调用；按帧间隔决定是否刷新。"""

@@ -236,7 +236,7 @@ class FSM:
         if self.lastKnobValue != knob.value() and not knobKey and self.onOffStatus:
             # 按住旋钮旋转 → 色温调节
             delt = knob.value() - self.lastKnobValue
-            self.colorTemperature = max(0, min(100, self.colorTemperature + delt * 2))
+            self.colorTemperature = max(0, min(100, self.colorTemperature + delt))
             self._recalcBrightness()
             self.lastKnobValue = knob.value()
             self.lastKnobKey = knobKey
@@ -244,7 +244,7 @@ class FSM:
         elif self.lastKnobValue != knob.value() and knobKey and self.onOffStatus:
             # 不按旋钮旋转 → 亮度调节
             delt = knob.value() - self.lastKnobValue
-            self.brightness = max(0, min(100, self.brightness + delt * 2))
+            self.brightness = max(0, min(100, self.brightness + delt))
             self._recalcBrightness()
             self.lastKnobValue = knob.value()
             self.lastKnobKey = knobKey
@@ -311,26 +311,34 @@ class FSM:
                                         self.config["whitePwmMin"], self.config["whitePwmMax"], whiteCal * 10)
                 self._configDirty = False
             else:
-                if self._configDirty or self.yellowBrightnessTemp != yellowTarget:
-                    diff = self.yellowBrightnessTemp - yellowTarget
-                    if diff > step:
-                        self.yellowBrightnessTemp -= step
-                    elif diff < -step:
-                        self.yellowBrightnessTemp += step
-                    else:
+                # 渐变输出：大步长由 FADE_TIME_MS 决定（满量程 0→100% 约 2s），
+                # 但单次旋钮仅变化 1%，原 step(2.5%/tick) 大于变化量导致 1 tick 直达、看不到渐变。
+                # 现对小变化用"剩余差值比例"逼近：move=min(step, |diff|*0.25)，
+                # 大变化仍按 2s 走完，小变化至少 4~5 tick 平滑过渡（带 ease-out 手感）。
+                if self._configDirty or abs(self.yellowBrightnessTemp - yellowTarget) > 0.01:
+                    diff = yellowTarget - self.yellowBrightnessTemp
+                    if abs(diff) <= 0.3:
                         self.yellowBrightnessTemp = yellowTarget
+                    else:
+                        move = min(step, abs(diff) * 0.25)
+                        if diff > 0:
+                            self.yellowBrightnessTemp += move
+                        else:
+                            self.yellowBrightnessTemp -= move
                     yellowCal = self.calibratePower(self.yellowBrightnessTemp, self.YELLOW_CALC_TABLE)
                     self.bspInstance.setPwm("yellowPwm", self.config["yellowPwmFreq"],
                                             self.config["yellowPwmMin"], self.config["yellowPwmMax"], yellowCal * 10)
 
-                if self._configDirty or self.whiteBrightnessTemp != whiteTarget:
-                    diff = self.whiteBrightnessTemp - whiteTarget
-                    if diff > step:
-                        self.whiteBrightnessTemp -= step
-                    elif diff < -step:
-                        self.whiteBrightnessTemp += step
-                    else:
+                if self._configDirty or abs(self.whiteBrightnessTemp - whiteTarget) > 0.01:
+                    diff = whiteTarget - self.whiteBrightnessTemp
+                    if abs(diff) <= 0.3:
                         self.whiteBrightnessTemp = whiteTarget
+                    else:
+                        move = min(step, abs(diff) * 0.25)
+                        if diff > 0:
+                            self.whiteBrightnessTemp += move
+                        else:
+                            self.whiteBrightnessTemp -= move
                     whiteCal = self.calibratePower(self.whiteBrightnessTemp, self.WHITE_CALC_TABLE)
                     self.bspInstance.setPwm("whitePwm", self.config["whitePwmFreq"],
                                             self.config["whitePwmMin"], self.config["whitePwmMax"], whiteCal * 10)

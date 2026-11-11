@@ -111,7 +111,7 @@ class BSP:
                               pin_num_dt=self.PIN_ROTARY_DT,
                               min_val=0,
                               max_val=20,
-                              reverse=False,
+                              reverse=True,
                               range_mode=RotaryIRQ.RANGE_UNBOUNDED,
                               invert=False)
         self.knobKey = Pin(self.PIN_ROTARY_KEY, Pin.IN, Pin.PULL_UP)

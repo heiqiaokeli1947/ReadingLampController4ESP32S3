@@ -11,7 +11,7 @@
         .header h1 { font-size: 1.4rem; margin: 0; }
         .header .meta { font-size: 0.85rem; opacity: 0.85; }
         .container { padding: 20px; max-width: 1200px; margin: 0 auto; }
-        .card { background: #fff; border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); padding: 20px; margin-bottom: 20px; }
+        .card { background: #fff; border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column; }
         .card h2 { font-size: 1.1rem; margin: 0 0 16px; color: #2c3e50; border-left: 4px solid #3498db; padding-left: 10px; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
@@ -36,9 +36,6 @@
         .slider-group { margin: 20px 0; }
         .slider-group label { display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: 500; color: #34495e; }
         .slider-group input[type=range] { width: 100%; }
-        .channel-bar { display: flex; height: 24px; border-radius: 12px; overflow: hidden; margin-top: 8px; }
-        .channel-bar .yellow { background: #f1c40f; }
-        .channel-bar .white { background: #ecf0f1; }
         .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 2px solid #e1e8ed; }
         .tab { padding: 10px 22px; cursor: pointer; border: none; background: none; font-size: 1rem; color: #7f8c8d; border-bottom: 3px solid transparent; margin-bottom: -2px; }
         .tab.active { color: #3498db; border-bottom-color: #3498db; font-weight: 600; }
@@ -160,13 +157,6 @@
                             <div class="value" style="font-size:1.1rem" id="powerOnCount">--</div>
                         </div>
                     </div>
-                    <div style="margin-top:14px">
-                        <div style="font-size:0.8rem;color:#7f8c8d;margin-bottom:4px">黄/白通道占比</div>
-                        <div class="channel-bar">
-                            <div class="yellow" id="barYellow" style="width:50%"></div>
-                            <div class="white" id="barWhite" style="width:50%"></div>
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -203,7 +193,7 @@
                         <label>风扇调整延迟（秒）</label>
                         <input type="number" id="fanDelayTime" min="1" max="3600" value="5">
                     </div>
-                    <button class="btn btn-success" id="btnSaveThreshold">保存阈值</button>
+                    <button class="btn btn-success" id="btnSaveThreshold" style="margin-top:auto">保存</button>
                 </div>
 
                 <div class="card">
@@ -218,30 +208,40 @@
                         <input type="number" id="eyeRemindInterval" min="0" max="60" value="0">
                     </div>
                     <p style="font-size:0.85rem;color:#7f8c8d">开灯超过该时长后，灯光以 10 秒 4 周期的明暗脉冲（当前亮度 10%~100%）提醒休息。</p>
-                    <button class="btn btn-success" id="btnSaveRemind">保存</button>
+                    <button class="btn btn-success" id="btnSaveRemind" style="margin-top:auto">保存</button>
                 </div>
             </div>
 
             <div class="card">
                 <h2>PWM 参数</h2>
                 <div id="pwmContainer"></div>
-                <button class="btn btn-success" id="btnSavePWM">保存 PWM</button>
+                <button class="btn btn-success" id="btnSavePWM" style="margin-top:auto">保存</button>
             </div>
 
             <div class="card">
                 <h2>矩阵显示设置</h2>
                 <div class="form-group">
                     <label>动画效果（与滚动文字二选一）</label>
-                    <div class="grid-4" id="matrixAnimBtns">
-                        <button class="btn" data-name="rainbow">🌈 彩虹</button>
-                        <button class="btn" data-name="breathing">💗 呼吸</button>
-                        <button class="btn" data-name="bounce">⚽ 弹球</button>
-                        <button class="btn" data-name="plasma">🌌 等离子</button>
-                        <button class="btn" data-name="life">🧬 生命游戏</button>
-                        <button class="btn" data-name="rain">🌧️ 流星</button>
-                        <button class="btn" data-name="matrix">💚 数字雨</button>
-                        <button class="btn" data-name="wave">🌊 涟漪</button>
-                    </div>
+                    <select id="matrixAnimSelect" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;cursor:pointer">
+                        <option value="rainbow">🌈 彩虹</option>
+                        <option value="breathing">💗 呼吸</option>
+                        <option value="bounce">⚽ 弹球</option>
+                        <option value="plasma">🌌 等离子</option>
+                        <option value="life">🧬 生命游戏</option>
+                        <option value="rain">🌧️ 流星</option>
+                        <option value="matrix">💚 数字雨</option>
+                        <option value="wave">🌊 涟漪</option>
+                        <option value="comet">☄️ 彗星</option>
+                        <option value="sparkle">✨ 星光闪烁</option>
+                        <option value="snake">🐍 贪吃蛇</option>
+                        <option value="starburst">💥 星爆</option>
+                        <option value="checkerboard">♟️ 棋盘格</option>
+                        <option value="cyclon">👁️ 赛隆之眼</option>
+                        <option value="spiral">🌀 旋转螺旋</option>
+                        <option value="fire">🔥 火焰</option>
+                        <option value="heartbeat">❤️ 心跳</option>
+                        <option value="rings">⭕ 涟漪环</option>
+                    </select>
                 </div>
                 <div class="slider-group">
                     <label><span>亮度</span><span><span id="matrixBrightVal">100</span>%</span></label>
@@ -269,10 +269,10 @@
                         <label><span>滚动速度</span><span><span id="matrixSpeedVal">20</span> 像素/秒</span></label>
                         <input type="range" id="matrixSpeed" min="1" max="100" value="20">
                     </div>
-                    <div style="display:flex;gap:8px">
-                        <input type="text" id="matrixText" placeholder="输入文字后按回车或点击播放" maxlength="40" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px">
-                        <button class="btn btn-primary" id="btnMatrixScroll">播放</button>
-                        <button class="btn" id="btnMatrixOff" style="background:#95a5a6;color:#fff">关闭</button>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                        <input type="text" id="matrixText" placeholder="输入文字后按回车或点击播放" maxlength="40" style="flex:1 1 120px;min-width:0;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                        <button class="btn btn-primary" id="btnMatrixScroll" style="flex:0 0 auto">播放</button>
+                        <button class="btn" id="btnMatrixOff" style="background:#95a5a6;color:#fff;flex:0 0 auto">关闭</button>
                     </div>
                 </div>
             </div>
@@ -300,8 +300,10 @@
                         <label>AP 密码</label>
                         <input type="text" id="APPwd" value="19880612">
                     </div>
-                    <button class="btn btn-primary" id="btnScanAP">扫描 WiFi</button>
-                    <button class="btn btn-success" id="btnSaveWifi">保存并连接</button>
+                    <div class="grid-2" style="margin-top:auto">
+                        <button class="btn btn-primary" id="btnScanAP">扫描 WiFi</button>
+                        <button class="btn btn-success" id="btnSaveWifi">保存并连接</button>
+                    </div>
                 </div>
 
                 <div class="card">
@@ -311,7 +313,7 @@
                         <input type="password" id="devicepwd" value="pengping">
                     </div>
                     <p style="font-size:0.85rem;color:#7f8c8d">设备密码用于所有配置修改操作的鉴权。</p>
-                    <div class="grid-2">
+                    <div class="grid-2" style="margin-top:auto">
                         <button class="btn btn-warning" id="btnRestart">🔄 重启设备</button>
                         <button class="btn btn-danger" id="btnReset">⚠️ 恢复出厂</button>
                     </div>
@@ -344,11 +346,11 @@
         return unit ? v + unit : v;
     }
     function fmtTime(s) {
-        if (!s || s < 0) return '--';
+        if (s == null || isNaN(s) || s < 0) return '--';
         const h = Math.floor(s / 3600);
         const m = Math.floor((s % 3600) / 60);
         const sec = s % 60;
-        return h > 0 ? `${h}h${m}m` : m > 0 ? `${m}m${sec}s` : `${sec}s`;
+        return h > 0 ? `${h}时${m}分${sec}秒` : m > 0 ? `${m}分${sec}秒` : `${sec}秒`;
     }
     function toast(title, msg, type) {
         swal({ title, text: msg, icon: type || 'success', timer: 2000 });
@@ -433,10 +435,6 @@
         $('#sysTotalRun').text(fmtTime(d.totalRunTime));
         $('#sysRunTime').text(fmtTime(d.runTime));
         $('#powerOnCount').text(d.powerOnCount || 0);
-        const yPct = Math.round(d.yellowBrightness || 0);
-        const wPct = Math.round(d.whiteBrightness || 0);
-        $('#barYellow').css('width', yPct + '%');
-        $('#barWhite').css('width', wPct + '%');
 
         // 延迟关灯开关状态
         const delayedOn = (d.delayedOff || 0) === 1;
@@ -502,11 +500,11 @@
             <div style="border:1px solid #eee;border-radius:6px;padding:10px">
                 <div style="font-weight:600;margin-bottom:6px">${ch.label}</div>
                 <div class="pwm-grid">
-                    <div><label style="font-size:0.75rem">频率</label>
+                    <div><label style="font-size:0.75rem">频率 (Hz)</label>
                         <input type="number" id="${ch.key}Freq" min="1" max="78125" value="25000"></div>
-                    <div><label style="font-size:0.75rem">最小</label>
+                    <div><label style="font-size:0.75rem">最小占空比 (%)</label>
                         <input type="number" id="${ch.key}Min" min="0" max="100" value="15"></div>
-                    <div><label style="font-size:0.75rem">最大</label>
+                    <div><label style="font-size:0.75rem">最大占空比 (%)</label>
                         <input type="number" id="${ch.key}Max" min="0" max="100" value="100"></div>
                 </div>
             </div>
@@ -533,6 +531,7 @@
         setVal('#eyeRemindInterval', d.eyeRemindInterval);
         setVal('#devicename', d.devicename);
         setVal('#ssid', d.wifiname);
+        setVal('#wifipwd', d.wifipwd);
         setVal('#APName', d.APName);
         setVal('#APPwd', d.APPwd);
         PWM_CHANNELS.forEach(ch => {
@@ -728,11 +727,7 @@
     }
 
     function updateMatrixAnimUI() {
-        $('#matrixAnimBtns button').each(function() {
-            const on = $(this).data('name') === matrixSettings.anim;
-            $(this).css('background', on ? '#3498db' : '');
-            $(this).css('color', on ? '#fff' : '');
-        });
+        $('#matrixAnimSelect').val(matrixSettings.anim || 'rainbow');
     }
 
     function updateMatrixColorUI() {
@@ -748,25 +743,86 @@
     $(document).on('click', '.matrix-color-btn', function() {
         matrixSettings.color = $(this).data('color');
         updateMatrixColorUI();
+        // 预设色块点击：立即下发颜色（无需节流）
+        if (_matrixSendTimer) { clearTimeout(_matrixSendTimer); _matrixSendTimer = null; }
+        _matrixLastSend = Date.now();
+        $.get('/matrix', { mode: 'update', devicepwd: pwd(), color: matrixSettings.color });
     });
     $(document).on('input', '#matrixCustomColor', function() {
         matrixSettings.color = $(this).val();
         updateMatrixColorUI();
+        // 取色器拖动：节流下发
+        scheduleMatrixUpdate();
     });
+    $(document).on('change', '#matrixCustomColor', function() {
+        matrixSettings.color = $(this).val();
+        updateMatrixColorUI();
+        // 取色器松手：确保最终值落盘
+        if (_matrixSendTimer) { clearTimeout(_matrixSendTimer); _matrixSendTimer = null; }
+        _matrixLastSend = Date.now();
+        $.get('/matrix', { mode: 'update', devicepwd: pwd(), color: matrixSettings.color });
+    });
+
+    // 矩阵参数实时下发：滑动条/取色器变动即推送，节流 120ms 避免拖动时请求风暴
+    let _matrixSendTimer = null;
+    let _matrixLastSend = 0;
+    function scheduleMatrixUpdate() {
+        const now = Date.now();
+        const elapsed = now - _matrixLastSend;
+        if (elapsed >= 120) {
+            // 距上次下发已满 120ms，立即发送
+            _matrixLastSend = now;
+            if (_matrixSendTimer) { clearTimeout(_matrixSendTimer); _matrixSendTimer = null; }
+            $.get('/matrix', {
+                mode: 'update', devicepwd: pwd(),
+                brightness: matrixSettings.brightness,
+                speed: matrixSettings.speed,
+                color: matrixSettings.color
+            });
+        } else if (!_matrixSendTimer) {
+            // 节流窗口内，安排尾部补发最新值
+            _matrixSendTimer = setTimeout(function () {
+                _matrixSendTimer = null;
+                _matrixLastSend = Date.now();
+                $.get('/matrix', {
+                    mode: 'update', devicepwd: pwd(),
+                    brightness: matrixSettings.brightness,
+                    speed: matrixSettings.speed,
+                    color: matrixSettings.color
+                });
+            }, 120 - elapsed);
+        }
+    }
 
     $(document).on('input', '#matrixBright', function() {
         matrixSettings.brightness = parseInt($(this).val()) / 100;
         $('#matrixBrightVal').text($(this).val());
+        scheduleMatrixUpdate();
+    });
+    $(document).on('change', '#matrixBright', function() {
+        // 松手时确保最终值落盘（取消节流等待，立即发送）
+        matrixSettings.brightness = parseInt($(this).val()) / 100;
+        $('#matrixBrightVal').text($(this).val());
+        if (_matrixSendTimer) { clearTimeout(_matrixSendTimer); _matrixSendTimer = null; }
+        _matrixLastSend = Date.now();
+        $.get('/matrix', { mode: 'update', devicepwd: pwd(), brightness: matrixSettings.brightness, speed: matrixSettings.speed, color: matrixSettings.color });
     });
     $(document).on('input', '#matrixSpeed', function() {
         matrixSettings.speed = parseInt($(this).val());
         $('#matrixSpeedVal').text($(this).val());
+        scheduleMatrixUpdate();
+    });
+    $(document).on('change', '#matrixSpeed', function() {
+        matrixSettings.speed = parseInt($(this).val());
+        $('#matrixSpeedVal').text($(this).val());
+        if (_matrixSendTimer) { clearTimeout(_matrixSendTimer); _matrixSendTimer = null; }
+        _matrixLastSend = Date.now();
+        $.get('/matrix', { mode: 'update', devicepwd: pwd(), brightness: matrixSettings.brightness, speed: matrixSettings.speed, color: matrixSettings.color });
     });
 
-    $(document).on('click', '#matrixAnimBtns button', function() {
-        const name = $(this).data('name');
+    $(document).on('change', '#matrixAnimSelect', function() {
+        const name = $(this).val();
         matrixSettings.anim = name;
-        updateMatrixAnimUI();
         $.get('/matrix', { mode: 'set', devicepwd: pwd(), name: name, brightness: matrixSettings.brightness });
     });
     $(document).on('click', '#btnMatrixScroll', function() {
