@@ -1,6 +1,6 @@
 # 阅读台灯控制器设计文档 (DESIGN.md)
 
-> 本设计文档按当前代码实现刷新（2026-11-09），覆盖从 ESP32-WROOM-32 迁移至 ESP32-S3 后的完整形态，架构对齐 Aotomizer4ESP32S3 雾化器项目。所有结论均可由源码逐行佐证。
+> 本设计文档按当前代码实现刷新（2026-11-11），覆盖从 ESP32-WROOM-32 迁移至 ESP32-S3 后的完整形态，架构对齐 Aotomizer4ESP32S3 雾化器项目。所有结论均可由源码逐行佐证。
 
 ## 版本历史
 
@@ -11,6 +11,7 @@
 | v1.2 | 2026-11-09 | 新增第 20 节：代码优化记录（10 项优化，硬件验证通过） |
 | v1.3 | 2026-11-09 | 新增第 0 节：核心原则（代码稳定性优先）；更新架构图为 ThermalControlFSM 基类继承关系 |
 | v1.4 | 2026-11-09 | 新增第 0.2 节：术语表；新增第 21 节：安全性设计；新增第 22 节：测试规范；新增第 23 节：监控与告警；新增第 24 节：日志规范；完善 Web API 错误码 |
+| v1.5 | 2026-11-11 | 新增 WS2818 8×8 RGB 矩阵（18 动画 + 滚动文本）；编码器步长 2%→1%、方向顺时针增亮；调光渐变修复（小变化 ease-out）；前端 UI 多项优化（矩阵参数实时下发、按钮对齐、时间中文单位、保存按钮统一、WiFi 密码回显、fmtTime 始终显示秒）；静态资源加 Cache-Control: max-age=0 |
 
 ---
 
@@ -58,7 +59,7 @@
 ## 1. 项目概述
 
 ### 1.1 项目定位
-基于 **ESP32-S3** 的智能阅读台灯控制器，运行 **MicroPython** 固件。核心功能：旋钮调节亮度/色温（暖黄+冷白双色 PWM 混光）、水冷级联散热（灯板温度驱动水泵 → 散热器出水口温度驱动风扇）、双路 LM75A 温度监测与平滑调速（EMA 滤波 + 滞回带 + 渐变限速）、WiFi Web 配置界面与实时监控。预留 BMP280/HDC1080/BH1750/PMS5003 传感器接口（驱动已移植，当前未接入硬件）。
+基于 **ESP32-S3** 的智能阅读台灯控制器，运行 **MicroPython** 固件。核心功能：旋钮调节亮度/色温（暖黄+冷白双色 PWM 混光）、水冷级联散热（灯板温度驱动水泵 → 散热器出水口温度驱动风扇）、双路 LM75A 温度监测与平滑调速（EMA 滤波 + 滞回带 + 渐变限速）、8×8 WS2818 RGB 矩阵（18 种内置动画 + 滚动文本）、WiFi Web 配置界面与实时监控。预留 BMP280/HDC1080/BH1750/PMS5003 传感器接口（驱动已移植，当前未接入硬件）。
 
 ### 1.2 核心特性
 
@@ -67,7 +68,8 @@
 | 旋钮控制 | 旋转调亮度（0-100%），按住旋转调色温（0-100% 冷白占比），按键开关灯 |
 | 双色温混光 | 暖黄 LED + 冷白 LED 独立 PWM，按色温比例分配亮度 |
 | 功率校准 | 内置黄/白 LED 电流校准表，线性插值修正 PWM-亮度非线性 |
-| 平滑调光 | 全量程 2s 的时间驱动渐变（`FADE_TIME_MS=2000`），开关灯/调亮度/调色温均无突变 |
+| 平滑调光 | 全量程 2s 的时间驱动渐变（`FADE_TIME_MS=2000`）；小变化（如旋钮 1%）用 `min(step, |diff|×0.25)` 做 ease-out 平滑过渡，避免 1 tick 直达 |
+| 8×8 RGB 矩阵 | WS2818 灯珠，18 种内置动画（彩虹/呼吸/等离子/生命游戏/火焰等）+ 5×8 字体滚动文本；亮度/速度/颜色支持运行中实时更新（不重启动画） |
 | 风扇温控 | 散热器出水口 LM75A(0x4A) 温度线性映射风扇转速，二级散热，关灯即停 |
 | 水泵温控 | 灯板 LM75A(0x4F) 温度线性映射水泵转速，一级散热，关灯后继续循环降温 |
 | 平滑调速 | EMA 温度滤波（α=0.25）+ ±1.5℃ 滞回 + 25%/s 渐变限速，消除启停震荡与转速跳变 |
@@ -122,6 +124,8 @@ ReadingLampController4ESP32S3/
 │   ├── LightControllFSM.py    # 灯光控制状态机（旋钮+调光+校准）
 │   ├── FanFSM.py              # 风扇控制状态机（EMA滤波+滞回+渐变限速）
 │   ├── PumpFSM.py             # 水泵控制状态机（EMA滤波+滞回+渐变限速）
+│   ├── ThermalControlFSM.py   # 温控 FSM 基类（FanFSM/PumpFSM 继承）
+│   ├── matrix_anim.py         # WS2818 矩阵动画引擎（18 动画 + ScrollText）
 │   ├── sensorData.py          # 全局传感器数据容器（含预留字段）
 │   ├── DBUtils.py             # BTree 数据库读写（线程锁串行化）
 │   ├── wifi.py                # WiFi 连接管理 + 复位式重连
@@ -132,6 +136,8 @@ ReadingLampController4ESP32S3/
 │
 ├── driver/                    # 驱动层
 │   ├── bsp.py                 # 板级支持包（单例，硬件初始化与访问）
+│   ├── ws2818_matrix.py       # WS2818 8×8 RGB 矩阵驱动（RMT 单线 800kHz）
+│   ├── matrix_font.py         # 5×8 字体（A-Z a-z 0-9 标点）
 │   ├── lm75a.py               # LM75A 温度传感器（I²C 0x4A/0x4F）
 │   ├── bmp280.py              # BMP280 气压/温度（预留死代码）
 │   ├── hdc1080.py             # HDC1080 温湿度（预留死代码）
@@ -302,13 +308,13 @@ for ch, key in (...):
 │  │  │    FanFSM       │  │   PumpFSM      │                  │   │
 │  │  │  (二级散热)      │  │  (一级散热)     │                  │   │
 │  │  └─────────────────┘  └────────────────┘                  │   │
-│  │  LightControllFSM │ sensorData │ DBUtils │ wifi │ ntpSync │   │
+│  │  LightControllFSM │ sensorData │ DBUtils │ wifi │ ntpSync │ matrix_anim │   │
 │  └──────────────────────────┬────────────────────────────────┘   │
 │                             │                                    │
 │                             ▼                                    │
 │  ┌───────────────────────────────────────────────────────────┐   │
 │  │              driver 驱动层 (BSP 单例)                       │   │
-│  │  lm75a ×2 │ 编码器(RotaryIRQ) │ GPIO │ PWM 4ch │ WS2812    │   │
+│  │  lm75a ×2 │ 编码器(RotaryIRQ) │ GPIO │ PWM 4ch │ WS2812 │ WS2818矩阵 │   │
 │  └──────────────────────────┬────────────────────────────────┘   │
 │                             │                                    │
 │                             ▼                                    │
@@ -370,9 +376,10 @@ boot → 加载配置(DB+默认合并) → 生成 deviceId → BSP 初始化 →
 4. `lightFSM.run()` — 灯光 FSM（旋钮 20Hz 响应）
 5. `fanFSMInstance.run()` — 风扇 FSM（1Hz）
 6. `pumpFSMInstance.run()` — 水泵 FSM（1Hz）
-7. `bspInstance.readSensors()` — LM75A 读取（1Hz，BSP 内部节流，含老化判定与总线自愈）
-8. WiFi 断线重连（normal 模式每 30s，后台线程）
-9. 定时任务（时间驱动）：GC 5min / LED 翻转 2s / 配置+系统总运行时间落盘 1h
+7. `matrixAnim.run()` — WS2818 矩阵动画刷新（24fps 内部节流）
+8. `bspInstance.readSensors()` — LM75A 读取（1Hz，BSP 内部节流，含老化判定与总线自愈）
+9. WiFi 断线重连（normal 模式每 30s，后台线程）
+10. 定时任务（时间驱动）：GC 5min / LED 翻转 2s / 配置+系统总运行时间落盘 1h
 
 **系统运行统计（main.py 主循环内）：**
 - `runMs` — 本次上电运行毫秒数，每 tick 累加，输出 `runTime = runMs // 1000`
@@ -396,7 +403,8 @@ boot → 加载配置(DB+默认合并) → 生成 deviceId → BSP 初始化 →
 | `recoverI2C()` | 重建 SoftI2C 并重新绑定 LM75A（总线锁死自愈路径） |
 | `setPwm(ch, freq, min, max, percent, reverse)` | 0-1000 映射到 min~max 占空比，频率未变跳过 `freq()` |
 | `enableLED(status)` | LED 电源使能 A+B 同步开关 |
-| `setLEDArray(color)` | WS2812 RGB 颜色 |
+| `setLEDArray(color)` | WS2812 RGB 颜色（状态指示） |
+| `matrix` | WS2818 8×8 矩阵驱动对象（`WS2818Matrix`，GPIO47，rotation=90, serpentine=False） |
 | `getknob()` | 返回 (RotaryIRQ 对象, KEY 电平) |
 
 **`setPwm` 占空比计算：**
@@ -417,10 +425,12 @@ duty = full * (percent / 1000.0) + base   # 线性映射
 
 | 操作 | 条件 | 行为 |
 |------|------|------|
-| 旋转（不按键） | `lastKnobValue != value` && `knobKey=1` && 灯开 | 亮度 ±2%/格，钳位 0-100 |
-| 旋转（按住键） | `lastKnobValue != value` && `knobKey=0` && 灯开 | 色温 ±2%/格，钳位 0-100 |
+| 旋转（不按键） | `lastKnobValue != value` && `knobKey=1` && 灯开 | 亮度 ±1%/格，钳位 0-100 |
+| 旋转（按住键） | `lastKnobValue != value` && `knobKey=0` && 灯开 | 色温 ±1%/格，钳位 0-100 |
 | 按键按下（下降沿） | `lastKnobKey != knobKey` && `knobKey=0` | 切换开关灯 |
 | 关灯时旋转 | 灯关 | 只同步 `lastKnobValue` 基准，不调节；否则开灯后首次旋转会按累积差值跳变 |
+
+**编码器方向：** `RotaryIRQ(reverse=True)`，物理顺时针 → value 增大 → 亮度/色温升高。
 
 **色温混光：**
 ```
@@ -435,10 +445,14 @@ whiteBrightness  = brightness * colorTemperature / 100
 
 ```
 step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
-*BrightnessTemp 向 *Brightness 逼近 step，剩余差值不足 step 时直接落到目标
+大变化：*BrightnessTemp 向 *Brightness 逼近 step（每 tick 约 2.5%）
+小变化（|diff| < step）：move = min(step, |diff| × 0.25)，带 ease-out 手感
+剩余差值 ≤ 0.3 时直接落到目标
 ```
 
 主循环 20Hz 下每步约 2.5%，40 次走完全量程；因步长与频率解耦，即使主循环被阻塞、tick 间隔变大（如 300ms），也能在剩余时间内补上、总时长仍约 2s。`_offApplied` 标记避免关灯态重复写 PWM=0；`*BrightnessTemp` 通过 `yellowApplied`/`whiteApplied` 暴露到 `/status` 便于确认调光是否真正落到硬件。
+
+**小变化渐变修复（v1.5）：** 原实现 `diff < step` 时直接 `temp = target`，1 个 tick（50ms）就到位，旋钮单格（1%）看不到渐变。改为 `move = min(step, |diff|×0.25)`：大变化仍按 2s 走完，小变化至少 4~5 个 tick 平滑过渡。
 
 **渐变耗时（按 2s 全量程折算，实测相符）：**
 
@@ -446,7 +460,7 @@ step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
 |------|--------|------|
 | 开关灯 / 滑块拉到另一端 | 100% | 2.0 s |
 | 亮度 70 → 100 | 30% | 0.6 s |
-| 旋钮单格 | 2% | 约 40 ms（视觉上即时响应） |
+| 旋钮单格 | 1% | 约 200~250 ms（ease-out 平滑过渡） |
 
 实测数据（亮度 0→100）：`t=1.1s 48.6%` → `t=1.7s 78.6%` → `t=2.33s 100%`（含 HTTP 往返约 0.3s），反向量程同样约 2s。
 
@@ -577,6 +591,32 @@ step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
 
 **btree + 模块级 `_thread` 锁。** 所有方法 `acquire → try/finally(操作+flush+closeDB+release)`。Key/Value 均为字符串，使用时手动类型转换。
 
+### 5.8 WS2818 矩阵（8×8 RGB）
+
+**硬件：** 8×8 WS2818 灯珠矩阵，单线 800kHz 时序（RMT 外设），数据脚 GPIO47，与状态灯 GPIO48 相邻。
+
+**驱动层 `driver/ws2818_matrix.py`：** `WS2818Matrix(pin, width, height, serpentine=False, rotation=90)`。坐标映射经像素定位测试校准为 `rotation=90, serpentine=False`，(0,0) 为左上角。提供 `set_pixel(x,y,color)`、`fill(color)`、`clear()`、`show()`、`brightness` 属性（0.01~1.0 整体亮度）。
+
+**字体 `driver/matrix_font.py`：** 5×8 点阵字体，覆盖 A-Z、a-z、0-9 及常用标点。
+
+**动画引擎 `domain/matrix_anim.py`：**
+
+| 组件 | 说明 |
+|------|------|
+| `Animation` 基类 | 定义 `update(dt)` 接口，子类实现帧逻辑 |
+| 18 种内置动画 | rainbow（彩虹）、breathing（呼吸）、bounce（弹跳）、plasma（等离子）、life（生命游戏）、rain（雨滴）、matrix（数字雨）、wave（波浪）、comet（彗星）、sparkle（星光）、snake（蛇）、starburst（星爆）、checkerboard（棋盘）、cyclon（气旋）、spiral（螺旋）、fire（火焰）、heartbeat（心跳）、rings（光环） |
+| `ScrollText` | 5×8 字体水平滚动文本，支持 `color`、`brightness`、`speed` 属性 |
+| `MatrixAnim` | 管理器：`play(name)` 切换内置动画、`scroll_text(...)` 播放滚动文本、`stop()` 停止、`update_params(brightness/speed/color)` 运行中实时更新（不重启）、`run()` 由主循环按帧间隔（`fps=24`）刷新 |
+
+**运行中参数更新（`update_params`）：**
+- `brightness`：写入矩阵驱动 `matrix.brightness`（所有动画共用），同时更新 `ScrollText.brightness` 缓存
+- `speed`：仅对具备 `speed` 属性的动画生效（`ScrollText` 及大部分内置动画）
+- `color`：仅对 `ScrollText` 生效（内置动画有各自配色，不响应外部颜色）
+
+**主循环调度：** `matrixAnim.run()` 每 tick 调用，内部按 `1000/fps`（约 42ms）决定是否刷新帧。`run()` 使用实际 `dt`（非固定间隔）计算动画进度，避免 Web 线程阻塞时画面卡顿。
+
+**开机行为：** 从 `systemConfig` 读取 `matrixAnim`（默认 `rainbow`）和 `matrixBrightness`（默认 1.0），自动播放。
+
 ---
 
 ## 6. 传感器驱动
@@ -613,11 +653,12 @@ step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
 | 路由 | 功能 |
 |------|------|
 | `GET /` | 返回 index.html（gzip） |
-| `GET /static/<path>` | 静态资源（gzip 预压缩） |
+| `GET /static/<path>` | 静态资源（gzip 预压缩，`Cache-Control: max-age=0`） |
 | `GET /favicon.ico` | 图标（gzip） |
 | `GET /status` | mode=get 查询状态 / mode=set 设置参数 |
 | `GET /scanap` | 扫描 WiFi AP |
 | `GET /setwifi` | 设置 WiFi（必填参数校验 + 日志脱敏） |
+| `GET /matrix` | 矩阵动画控制（list/set/scroll/off/update） |
 | `GET /reset` | 恢复出厂 |
 | `GET /restart` | 重启设备 |
 
@@ -663,7 +704,7 @@ step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
 | `fanTemp` / `ledTemp` | 两路 FSM 内部 EMA 滤波后的温度 |
 | `loopHz` | 主循环实测频率（每 5s 更新，用于发现阻塞掉速） |
 
-**安全约束：** `devicepwd`、`wifipwd`、`wifipwdDefault` 三个密码类字段**不下发**。前端不依赖它们（WiFi 密码框留空重填、设备密码框用本地默认值），避免任何持有 `devicepwd` 的客户端拿到 WiFi 明文密码。`APPwd` 仍需下发用于回填 AP 密码输入框。
+**安全约束：** `devicepwd`、`wifipwdDefault` 两个密码类字段**不下发**。`wifipwd`（WiFi 密码）自 v1.5 起**允许回显**——页面需 `devicepwd` 鉴权才能访问，且 AP 密码 `APPwd` 已下发回填，保持一致。前端 `syncSettingsForm` 直接填入 WiFi 密码输入框。
 
 ### 7.2 /status?mode=set
 **先校验后应用：** `validateSetArgs()` 对全部数值参数做范围校验 + 跨字段一致性（`fanL<fanH`、`LEDL<LEDH`、`*PwmMin<*PwmMax`），任一不合法返回 `errCode=-1` 且不应用任何修改。
@@ -699,6 +740,22 @@ step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
 
 任一必填参数缺失或为空返回 `errCode=-1`。保存后重启进入 STA 连接流程。日志经 `maskArgs` 脱敏，不打印 `pwd`/`devicepwd` 明文。
 
+### 7.5 /matrix — 矩阵动画控制
+
+需校验 `devicepwd`。所有操作均不阻塞主循环，动画由主循环 `matrixAnim.run()` 按帧刷新。
+
+| mode | 参数 | 说明 |
+|------|------|------|
+| `list` | — | 返回内置动画名称列表（18 种） |
+| `set` | `name`, `brightness`(可选) | 切换到指定动画并持久化；亮度同时写入矩阵驱动与 DB |
+| `scroll` | `text`, `color`(可选,#rrggbb 或 r,g,b), `brightness`(可选), `speed`(可选) | 以滚动文本模式播放（5×8 字体），参数持久化 |
+| `off` | — | 停止动画/滚动并清空矩阵 |
+| `update` | `brightness`/`speed`/`color`（任意组合） | **运行中实时更新**亮度/速度/颜色，不重启当前动画。亮度写矩阵驱动，速度/颜色仅对具备对应属性的动画生效（ScrollText 全部支持，内置动画大多支持 speed）。参数变更立即持久化。 |
+
+**持久化字段（systemConfig）：** `matrixAnim`（当前动画名）、`matrixBrightness`（0.01~1.0）、`matrixText`（滚动文本）、`matrixColor`（#rrggbb）、`matrixSpeed`（1~100）。开机默认播放存储的 `matrixAnim`（默认 `rainbow`）。
+
+**内置动画清单（18 种）：** rainbow, breathing, bounce, plasma, life, rain, matrix, wave, comet, sparkle, snake, starburst, checkerboard, cyclon, spiral, fire, heartbeat, rings。
+
 ---
 
 ## 8. 前端架构
@@ -712,7 +769,7 @@ Tab 由 jQuery 事件驱动（`.tab[data-tab=x]` ↔ `.tab-panel#panel-x`），*
 | Tab | 面板 ID | 内容 |
 |-----|---------|------|
 | 📊 监控 | `panel-monitor` | ① 灯光控制：开关按钮（开灯时背景色随色温从 3000K 暖黄渐变到 6000K 冷白）/ 亮度 / 色温（显示 3000~6000K）/ 快捷场景（暖光·中性·冷白·延迟关灯开关）<br>② 散热系统 + 系统状态 两张卡片（双列，散热系统在前；系统状态仅含 5 项运行统计：LED本次点亮/LED累计点亮/系统总运行/系统本次运行/上电次数，开关·亮度·色温已归入灯光控制卡片）<br>③ 温度与散热趋势图 |
-| ⚙️ 设置 | `panel-settings` | ① 散热阈值（散热器出水温度/LED温度/风扇调整延迟）② 延迟关灯与护眼（延迟关灯时间 3~300s、视疲劳提醒间隔 0~60min）③ PWM 四通道参数 ④ 网络设置（WiFi 扫描 / AP 热点）⑤ 设备管理（重启 / 恢复出厂） |
+| ⚙️ 设置 | `panel-settings` | ① 散热阈值（散热器出水温度/LED温度/风扇调整延迟）② 延迟关灯与护眼（延迟关灯时间 3~300s、视疲劳提醒间隔 0~60min）③ PWM 四通道参数（频率 Hz + 最小/最大占空比 %）④ 矩阵显示设置（动画选择/亮度/滚动文本+颜色+速度，亮度/速度/颜色滑动条变动即实时下发）⑤ 网络设置（WiFi 扫描 / AP 热点）⑥ 设备管理（重启 / 恢复出厂） |
 
 **设计原则：** 灯光控制是使用频率最高的操作，放在监控页首屏，页面一打开就能用；设置页只放低频的写入型参数，避免高频操作被埋在二级页签里。
 
@@ -756,7 +813,7 @@ Tab 由 jQuery 事件驱动（`.tab[data-tab=x]` ↔ `.tab-panel#panel-x`），*
 
 ### 8.4 静态资源 gzip 压缩
 
-设备端按 `Accept-Encoding` 直接返回 `.gz`，浏览器无感解压：
+设备端按 `Accept-Encoding` 直接返回 `.gz`，浏览器无感解压。所有静态资源响应头加 `Cache-Control: max-age=0`，浏览器每次访问重新校验，避免代码更新后缓存旧页面。
 
 | 文件 | 原始 | 压缩后 | 压缩率 |
 |------|------|--------|--------|
@@ -798,6 +855,12 @@ python -c "import gzip; d=open('static/index.html','rb').read(); open('static/in
 - 卡片外层 `.grid-2` 移动端降为单列，避免窄屏双列卡片内容挤压
 - 卡片内部 `.grid-4`（4 个指标块）移动端保持双列而非单列——单列时每个指标占满整行、数值 `1.8rem` 过大，双列 2×2 排布信息密度更合理
 - 同步收紧 metric 的 padding 与数值字号，避免双列后内容过挤
+
+**卡片底部对齐（v1.5）：** 设置页 `.card` 改为 `display:flex; flex-direction:column`，保存按钮加 `margin-top:auto`。由于 `.grid-2` 两卡片高度由 Grid 自动拉伸对齐，`margin-top:auto` 使左右卡片的保存按钮底部对齐。网络设置卡片的「扫描 WiFi」与「保存并连接」按钮用 `.grid-2` 包裹改为左右并排。
+
+**矩阵播放按钮对齐（v1.5）：** 滚动文本输入框与播放/关闭按钮的 flex 容器加 `align-items:center`，按钮与输入框垂直居中。
+
+**时间显示（v1.5）：** `fmtTime()` 中文单位（时/分/秒），且小时>0 时仍显示秒（如 `62时0分32秒`），使系统总运行时间可见每秒递增；`ledRunTime` 为 0 时显示 `0秒` 而非 `--`。
 
 ---
 
@@ -922,16 +985,20 @@ setInterval 2s → GET /status?mode=get
 | 三个 FSM 均"每 tick 全流程" | 不做状态轮转：轮转会稀释每 tick 的有效动作，导致限速窗口/渐变速率只有设计值的 1/3 |
 | 停机只写一次 PWM | 关灯态 `setDeviceToReadyStatus` 去重，避免每秒重复写占空比 |
 | 配置定时器单例 | `Timer(3)` 只创建一次，避免 setwifi/reset/restart 重复占用硬件定时器 |
-| GET 不下发密码字段 | `devicepwd`/`wifipwd`/`wifipwdDefault` 从响应剔除 |
+| GET 不下发敏感密码字段 | `devicepwd`/`wifipwdDefault` 从响应剔除（`wifipwd`/`APPwd` 允许回显，页面需 devicepwd 鉴权） |
 | FSM 限速 elapsed 钳制 1500ms | 主循环阻塞（GC/WiFi 重连/配置重载）导致 `runTimeCounterMs` 跳变时，`elapsed` 钳制到 1.5s，单 tick 转速变化 ≤37.5%，避免 PWM 突变 |
 | `setBrightness(0)` 等同关灯 | 亮度滑到 0 时直接关灯并清 `_delayedOffPending`，避免"灯不关 / 倒计时残留" |
 | `ledTotalRunTime` 60s 节流 + 关灯即写 | 由每 10s 无条件写改为 60s 节流 + 关灯立即落盘，大幅降低 flash 磨损 |
 | FSM `config.get()` 防 KeyError | FanFSM/PumpFSM 由 `self.config["key"]` 改为 `self.config.get("key", default)`，配置缺字段不崩溃 |
+| 调光小变化 ease-out | `move = min(step, |diff|×0.25)`，旋钮单格 1% 不再 1 tick 直达，至少 4~5 tick 平滑过渡 |
+| 矩阵 `update_params` 不重启 | 亮度/速度/颜色运行中实时更新，不重建动画对象，画面不闪烁 |
+| 静态资源 `Cache-Control: max-age=0` | 浏览器每次访问重新校验，代码更新后无需手动清缓存 |
+| 前端滑动条 120ms 节流下发 | 矩阵亮度/速度/颜色滑动条变动即下发，避免拖动过程请求风暴 |
 
 ### 13.2 资源占用
 - Flash：源码 + 静态资源（含 .gz）约 1.5MB
 - RAM：MicroPython 堆，GC 每 5 分钟回收
-- GPIO：12 个，剩余充足
+- GPIO：13 个（12 原有 + WS2818 矩阵 GPIO47），剩余充足
 - 定时器：Timer 0(WDT) / 3(配置模式)，Timer 1/2 空闲
 - PWM：4 通道全用
 
@@ -1087,15 +1154,18 @@ Invoke-RestMethod "http://192.168.30.74/status?devicepwd=pengping&mode=get" -Hea
 
 ---
 
-## 18. 待验证项 / TODO
+## 18. 已验证项
 
-> 项目迁移（WROOM-32 → ESP32-S3）后尚未在硬件上验证的功能，需上电实测确认。
+> 项目迁移（WROOM-32 → ESP32-S3）后已在硬件上验证通过的功能。
 
-| # | 待验证项 | 涉及硬件/引脚 | 验证方法 | 优先级 |
-|---|----------|---------------|----------|--------|
-| 1 | **旋转编码器（CLK/DT）** | GPIO40(CLK) / GPIO39(DT) | 旋转旋钮，观察亮度/色温是否平滑变化（±2%/格），无丢步或跳变；串口日志确认 `lastKnobValue` 正常更新 | 高 |
-| 2 | **编码器按键（KEY）** | GPIO1 | 短按切换开关灯；长按 + 旋转调色温；注意 GPIO1 在部分 S3 核心板为 U0TXD，若接 USB-串口桥可能冲突（已知问题 #7） | 高 |
-| 3 | **编码器内部上拉有效性** | GPIO39/40/1 | 确认 `Pin.PULL_UP` 在 S3 上生效，断线时为高电平（静止态），旋转时边沿触发正常 | 中 |
+| # | 验证项 | 涉及硬件/引脚 | 验证结果 |
+|---|--------|---------------|----------|
+| 1 | **旋转编码器（CLK/DT）** | GPIO40(CLK) / GPIO39(DT) | ✅ 通过：旋转亮度/色温 ±1%/格，`reverse=True` 顺时针增亮，方向正确 |
+| 2 | **编码器按键（KEY）** | GPIO1 | ✅ 通过：短按切换开关灯，按住旋转调色温 |
+| 3 | **WS2818 8×8 矩阵** | GPIO47 | ✅ 通过：18 动画 + 滚动文本正常，坐标映射 `rotation=90, serpentine=False` |
+| 4 | **矩阵参数实时更新** | GPIO47 | ✅ 通过：亮度/速度/颜色滑动条变动即下发，动画不重启 |
+| 5 | **调光渐变** | yellowPwm/whitePwm | ✅ 通过：旋钮单格 1% 有 ease-out 平滑过渡，不再 1 tick 直达 |
+| 6 | **系统总运行时间** | DB | ✅ 通过：`totalRunTime` 随本次运行时间累加，fmtTime 始终显示秒 |
 
 ---
 
@@ -1158,17 +1228,17 @@ self.knob = Encoder(
 | 文件 | 改动内容 | 性质 |
 |------|----------|------|
 | `driver/bsp.py` | `RotaryIRQ` → `machine.Encoder`；`getknob()` 接口不变（仍返回 `(obj, key_level)`） | 驱动替换 |
-| `domain/LightControllFSM.py` | 步进系数 `delt * 2` → `delt * 0.5`（phases=4 时，保持每机械格 2% 亮度） | 参数调整 |
+| `domain/LightControllFSM.py` | 步进系数 `delt * 1` → `delt * 0.25`（phases=4 时，保持每机械格 1% 亮度） | 参数调整 |
 | `domain/LightControllFSM.py` | 按键去抖：20ms 窗口内忽略重复下降沿（修复原有 bug） | 缺陷修复 |
 | `lib/rotary/` | 整个目录可删除 | 清理依赖 |
 
-**步进系数换算表**（保持"1 机械格 = 2% 亮度"不变）：
+**步进系数换算表**（保持"1 机械格 = 1% 亮度"不变）：
 
 | phases 参数 | 分辨率倍率 | 亮度步进系数 |
 |-------------|-----------|-------------|
-| 1 | 1x | `* 2`（与当前相同） |
-| 2 | 2x | `* 1` |
-| 4（推荐） | 4x | `* 0.5` |
+| 1 | 1x | `* 1`（与当前相同） |
+| 2 | 2x | `* 0.5` |
+| 4（推荐） | 4x | `* 0.25` |
 
 ### 19.5 前置条件（必须先完成）
 
@@ -1189,9 +1259,9 @@ self.knob = Encoder(
 
 | 验证项 | 预期结果 |
 |--------|----------|
-| 顺时针旋转 | 亮度增加，每格约 2% |
-| 逆时针旋转 | 亮度减少，每格约 2% |
-| 按住 + 旋转 | 色温变化，每格约 2% |
+| 顺时针旋转 | 亮度增加，每格约 1% |
+| 逆时针旋转 | 亮度减少，每格约 1% |
+| 按住 + 旋转 | 色温变化，每格约 1% |
 | 短按按键 | 开关灯切换一次，无重复触发 |
 | 快速旋转 | 亮度平滑变化，无突变（delt 限幅生效） |
 | 主循环频率 | `loopHz` 稳定在 20Hz 附近，无 IRQ 打断导致的掉速 |
@@ -1339,7 +1409,7 @@ self.knob = Encoder(
 | 威胁 | 来源 | 风险等级 | 当前措施 |
 |------|------|----------|----------|
 | 未授权配置修改 | 局域网内任意客户端 | 中 | `devicepwd` 校验（仅 set/reset/restart） |
-| WiFi 密码泄露 | Web 接口返回明文 | 高 | 不下发 `wifipwd`/`devicepwd` 字段 |
+| WiFi 密码泄露 | Web 接口返回明文 | 中 | 页面需 `devicepwd` 鉴权才能访问；`wifipwd` 允许回显以支持表单回填（与 `APPwd` 一致）；`devicepwd` 自身不下发 |
 | 日志泄露密码 | 串口日志打印 | 中 | `maskArgs` 脱敏，不打印 `pwd`/`devicepwd` |
 | 固件篡改 | 物理刷写 | 低 | 无（依赖物理访问控制） |
 | 拒绝服务 | 高频 Web 请求 | 低 | 单线程 Microdot，天然限流 |
@@ -1351,7 +1421,7 @@ self.knob = Encoder(
 **传输：**
 - Web 接口使用 HTTP（明文），密码在 URL 查询参数中传输
 - 日志通过 `maskArgs()` 脱敏：`pwd`、`devicepwd`、`APPwd` 字段替换为 `***`
-- `/status?mode=get` 响应**不下发** `devicepwd`、`wifipwd`、`wifipwdDefault` 三个字段
+- `/status?mode=get` 响应**不下发** `devicepwd`、`wifipwdDefault` 字段；`wifipwd` 自 v1.5 起允许回显（页面需 devicepwd 鉴权，与 APPwd 回填保持一致）
 
 **建议（待评估）：**
 - 密码存储可考虑 Base64 或简单加密（非安全增强，仅防误看）
@@ -1400,8 +1470,8 @@ self.knob = Encoder(
 | 1 | 开机启动 | 14s 内进入主循环，无崩溃 | 串口日志 |
 | 2 | WiFi 连接 | STA 模式 36s 内连接成功 | 串口日志 + IP 查询 |
 | 3 | Web 访问 | `http://<ip>/` 正常返回页面 | 浏览器 |
-| 4 | 旋钮调光 | 顺时针亮度+2%/格，逆时针-2%/格 | 手动 + /status |
-| 5 | 旋钮调色温 | 按住旋转色温±2%/格 | 手动 + /status |
+| 4 | 旋钮调光 | 顺时针亮度+1%/格，逆时针-1%/格 | 手动 + /status |
+| 5 | 旋钮调色温 | 按住旋转色温±1%/格 | 手动 + /status |
 | 6 | 按键开关灯 | 短按切换，无重复触发 | 手动 |
 | 7 | 亮度滑到 0 | 灯灭，ledTotalRunTime 落盘 | /status |
 | 8 | 延迟关灯 | 到时间自动关灯 | /status delayedOffPending |
