@@ -23,7 +23,7 @@ class AACOptimized(object):
     """
     
     def __init__(self):
-        self.p = 101325.0  # 标准大气压 Pa
+        self.p = 101325.0  # 标准大气压 Pa（BMP280 未接入时的默认值）
         
         # 常量预定义，避免重复创建
         self._E_COEF1 = 611.2
@@ -33,6 +33,20 @@ class AACOptimized(object):
         self._V_COEF1 = 2501     # 0℃汽化潜热
         self._V_COEF2 = 1.85     # 水蒸气定压比热
         self._D_COEF = 0.622
+
+    def set_pressure(self, p_pa):
+        """动态设置大气压（来自 BMP280 实测值）。
+        参数 p_pa 单位为 Pa，需在 30000~110000 Pa 合理范围内，否则忽略并保持默认值。"""
+        try:
+            p = float(p_pa)
+        except (TypeError, ValueError):
+            return
+        if 30000.0 <= p <= 110000.0:
+            self.p = p
+
+    def reset_pressure(self):
+        """BMP280 数据失效时，回退到标准大气压 101325 Pa。"""
+        self.p = 101325.0
     
     def E(self, t):
         """饱和水汽压 E(t) = 611.2 * exp(17.67 * t / (243.5 + t))"""

@@ -2,9 +2,10 @@ class SensorData:
     """传感器数据容器，所有无效值统一初始化为 -9999"""
 
     def __init__(self):
-        # 温湿度（HDC1080，预留死代码，当前不接入）
+        # 温湿度（HDC1080）
         self.temp = -9999
         self.humi = -9999
+        self.wetBulb = -9999   # 湿球温度 (℃)，由 AACOps 根据干球温度+湿度计算
         # 气压海拔（BMP280，预留死代码）
         self.presure = -9999
         self.altitude = -9999

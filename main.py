@@ -281,6 +281,7 @@ def handler(request):
         sd = bspInstance.getSensorData()
         res["temp"] = sd.temp
         res["humi"] = sd.humi
+        res["wetBulb"] = sd.wetBulb
         res["presure"] = sd.presure
         res["luminance"] = sd.luminance
         res["pm25"] = sd.pm25

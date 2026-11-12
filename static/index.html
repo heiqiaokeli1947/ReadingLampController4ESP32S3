@@ -196,6 +196,29 @@
             </div>
 
             <div class="card">
+                <h2>环境监测</h2>
+                <div class="grid-4">
+                    <div class="metric">
+                        <div class="label">环境温度</div>
+                        <div class="value"><span id="envTemp">--</span><span class="unit">℃</span></div>
+                        <div class="value" style="font-size:0.8rem;margin-top:4px">湿球 <span id="envWetBulb">--</span> ℃</div>
+                    </div>
+                    <div class="metric">
+                        <div class="label">环境湿度</div>
+                        <div class="value"><span id="envHumi">--</span><span class="unit">%RH</span></div>
+                    </div>
+                    <div class="metric">
+                        <div class="label">大气压</div>
+                        <div class="value"><span id="envPress">--</span><span class="unit">hPa</span></div>
+                    </div>
+                    <div class="metric">
+                        <div class="label">光照强度</div>
+                        <div class="value"><span id="envLux">--</span><span class="unit">lux</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
                 <h2>温度与散热趋势</h2>
                 <div class="chart-container">
                     <canvas id="trendChart"></canvas>
@@ -498,6 +521,15 @@
         $('#pm100').text(fmt(pm100, ''));
         $('#part03').text(fmt(part03, ''));
         pm25Color($('#m-pm25'), pm25);
+
+        // 环境监测（HDC1080 温湿度 + BMP280 气压 + BH1750 光照）
+        const envT = d.temp, envH = d.humi, envP = d.presure, envL = d.luminance, envWB = d.wetBulb;
+        $('#envTemp').text(envT === INVALID || envT === undefined ? '--' : envT.toFixed(1));
+        $('#envWetBulb').text(envWB === INVALID || envWB === undefined ? '--' : envWB.toFixed(1));
+        $('#envHumi').text(envH === INVALID || envH === undefined ? '--' : envH.toFixed(1));
+        // BMP280 气压单位 Pa → hPa
+        $('#envPress').text(envP === INVALID || envP === undefined ? '--' : (envP / 100).toFixed(1));
+        $('#envLux').text(envL === INVALID || envL === undefined ? '--' : envL.toFixed(0));
 
         // 同步控制页滑块（仅当用户未在拖动时）
         if (!$('#brightnessSlider').is(':focus')) $('#brightnessSlider').val(d.brightness || 0);
