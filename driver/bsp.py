@@ -11,7 +11,7 @@ import driver.lm75a as lm75a
 # import driver.bmp280 as bmp280
 # import driver.hdc1080 as hdc1080
 # import driver.bh1750 as bh1750
-# import driver.pms5003 as pms5003
+import driver.pms5003 as pms5003
 from lib.rotary.rotary_irq_esp import RotaryIRQ
 from driver.ws2818_matrix import WS2818Matrix
 
@@ -19,6 +19,9 @@ from driver.ws2818_matrix import WS2818Matrix
 _SENSOR_STALE_MS = const(10000)        # 超过 10s 无有效值 → 数据判为老化，置无效值
 _I2C_MAX_FAIL_COUNT = const(30)        # 连续 30 次读失败 → 重建 I2C 总线
 _I2C_RECOVER_RETRY_MS = const(60000)   # 传感器全缺失时每 60s 重试扫描（支持热插拔）
+_PMS5003_INIT_RETRY = const(6)         # PMS5003 上电预热重试次数（传感器约需 10s 就绪）
+_PMS5003_INIT_DELAY_MS = const(2000)   # 每次重试间隔 2s
+_PMS_HOTPLUG_INTERVAL_MS = const(5000) # 热插拔重连检测间隔：PMS5003 缺失时每 5s 快速扫描一次
 
 _DEFAULT_PWM_FREQ = const(25000)
 _DEFAULT_PWM_DUTY = const(0)
@@ -95,16 +98,22 @@ class BSP:
         # 传感器健康状态（老化判定 + 总线自愈）
         self._lastGoodFanTick = 0      # 0 表示自启动起从未读到有效值
         self._lastGoodLedTick = 0
+        self._lastGoodPmsTick = 0
         self._fanReadFailed = False    # 故障/恢复日志翻转标记
         self._ledReadFailed = False
+        self._pmsReadFailed = False
         self._i2cFailCount = 0         # 连续读失败次数
         self._lastRecoverTick = utime.ticks_ms()
+        self._lastPmsHotPlugTick = 0   # PMS5003 热插拔重连检测上次时间戳
 
         # LM75A 温度传感器（散热器出水口 0x4A，灯板 0x4F）
         # 逐个容错：缺失/总线故障时降级为 None，避免 OSError 冒泡到模块级
         # bspInstance 实例化导致 main.py 启动中止（整机停摆）
         self.LM75FanTemp = self._createLm75A(0x4A, "fan")
         self.LM75LedTemp = self._createLm75A(0x4F, "led")
+
+        # PMS5003 颗粒物传感器（I2C 0x12，与 LM75A 共享 SoftI2C 总线）
+        self.pms5003 = self._createPMS5003()
 
         # 旋转编码器
         self.knob = RotaryIRQ(pin_num_clk=self.PIN_ROTARY_CLK,
@@ -167,6 +176,32 @@ class BSP:
                 name, address, e))
             return None
 
+    def _createPMS5003(self, quick=False):
+        """创建 PMS5003 实例并扫描总线。
+        PMS5003 上电后激光/风扇需约 10s 预热，I2C 接口在预热期可能无响应。
+        - quick=False（开机初始化）：多次重试扫描，等待传感器预热就绪
+        - quick=True（热插拔重连）：单次快速扫描，传感器已上电应立即响应"""
+        try:
+            sensor = pms5003.PMS5003(self.softI2C)
+            if quick:
+                if sensor.initHardware():
+                    log("PMS5003 (0x{:02X}) hot-plug detected.".format(
+                        pms5003.PMS5003.ADDRESS))
+                    return sensor
+                return None
+            for i in range(_PMS5003_INIT_RETRY):
+                if sensor.initHardware():
+                    log("PMS5003 (0x{:02X}) ready.".format(pms5003.PMS5003.ADDRESS))
+                    return sensor
+                if i < _PMS5003_INIT_RETRY - 1:
+                    utime.sleep_ms(_PMS5003_INIT_DELAY_MS)
+            log("[WARN] PMS5003 (0x{:02X}) not found on I2C bus after {} retries.".format(
+                pms5003.PMS5003.ADDRESS, _PMS5003_INIT_RETRY))
+            return None
+        except OSError as e:
+            log("[WARN] PMS5003 init failed:{}".format(e))
+            return None
+
     def readSensors(self):
         """由主循环时间驱动调用（1Hz），读取 LM75A 温度。容错策略：
         1. 单次读失败：保留上次有效值，日志仅在"故障/恢复"翻转时各打印一次
@@ -206,6 +241,30 @@ class BSP:
                     self._ledReadFailed = True
                     log("[WARN] LM75A led(0x4F) read failed, keep last value:{}".format(e))
 
+        # PMS5003 热插拔重连：对象为 None 时每 5s 快速扫描一次总线，
+        # 传感器插回后 5s 内自动恢复，无需等待 60s 的总线恢复周期
+        if self.pms5003 is None and \
+                utime.ticks_diff(now, self._lastPmsHotPlugTick) >= _PMS_HOTPLUG_INTERVAL_MS:
+            self._lastPmsHotPlugTick = now
+            detected = self._createPMS5003(quick=True)
+            if detected is not None:
+                self.pms5003 = detected
+
+        # PMS5003 颗粒物（读取失败/校验失败返回 None → 保留上次有效值）
+        if self.pms5003 is not None:
+            d = self.pms5003.read()
+            if d is not None:
+                self.__sensorData.updatePMS(d)
+                self._lastGoodPmsTick = now
+                if self._pmsReadFailed:
+                    self._pmsReadFailed = False
+                    log("PMS5003 read recovered.")
+            else:
+                failed = True
+                if not self._pmsReadFailed:
+                    self._pmsReadFailed = True
+                    log("[WARN] PMS5003 read failed, keep last value.")
+
         self._checkSensorAge(now)
 
         if failed:
@@ -216,7 +275,8 @@ class BSP:
         self._i2cFailCount = 0
 
         # 任一路传感器缺失（开机未接入/闪断后未恢复）：周期重试扫描，支持热插拔
-        if (self.LM75FanTemp is None or self.LM75LedTemp is None) and \
+        if (self.LM75FanTemp is None or self.LM75LedTemp is None or
+                self.pms5003 is None) and \
                 utime.ticks_diff(now, self._lastRecoverTick) >= _I2C_RECOVER_RETRY_MS:
             self.recoverI2C(now)
 
@@ -237,6 +297,18 @@ class BSP:
             log("[WARN] LM75A led(0x4F) data stale >{}s, mark invalid.".format(
                 _SENSOR_STALE_MS // 1000))
 
+        if self._lastGoodPmsTick != 0 and \
+                utime.ticks_diff(now, self._lastGoodPmsTick) >= _SENSOR_STALE_MS and \
+                self.__sensorData.pm2_5 != -9999:
+            self.__sensorData.updatePMS({
+                "pm1_0_cf": -9999, "pm2_5_cf": -9999, "pm10_cf": -9999,
+                "pm1_0": -9999, "pm2_5": -9999, "pm10": -9999,
+                "part0_3": -9999, "part0_5": -9999, "part1_0": -9999,
+                "part2_5": -9999, "part5_0": -9999, "part10": -9999,
+            })
+            log("[WARN] PMS5003 data stale >{}s, mark invalid.".format(
+                _SENSOR_STALE_MS // 1000))
+
     def recoverI2C(self, now=None):
         """重建 SoftI2C 总线并重新绑定传感器对象（总线锁死/从机掉线的自愈路径）。
         无条件尝试重建两路传感器（无论之前是否为 None），以支持热插拔恢复：
@@ -252,9 +324,10 @@ class BSP:
         except Exception as e:
             log("[ERROR] SoftI2C re-init failed:{}".format(e))
             return
-        # 无条件重建两路传感器（支持热插拔：即使之前因缺失被置 None，也要重新扫描）
+        # 无条件重建传感器（支持热插拔：即使之前因缺失被置 None，也要重新扫描）
         self.LM75FanTemp = self._createLm75A(0x4A, "fan")
         self.LM75LedTemp = self._createLm75A(0x4F, "led")
+        self.pms5003 = self._createPMS5003()
 
     # ===== 死传感器处理函数（预留，硬件未接入，读取逻辑已注释）=====
     # BMP280 气压/温度/海拔
@@ -275,9 +348,8 @@ class BSP:
         # self.__sensorData.luminance = self.bh1750.luminance(0x11)
         pass
 
-    # PMS5003 PM2.5
+    # PMS5003 PM2.5（已接入，读取逻辑在 readSensors 中）
     def pms5003TimerHandler(self):
-        # self.__sensorData.pm25 = self.pms5003.readPMS5003()
         pass
 
     def setLEDArray(self, color):

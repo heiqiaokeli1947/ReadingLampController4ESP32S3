@@ -23,7 +23,7 @@
             .metric { padding: 10px; }
             .metric .value { font-size: 1.4rem; }
         }
-        .metric { text-align: center; padding: 14px; background: #f8fafc; border-radius: 8px; }
+        .metric { text-align: center; padding: 14px; background: #f8fafc; border-radius: 8px; border: 2px solid transparent; }
         .metric .label { font-size: 0.8rem; color: #7f8c8d; }
         .metric .value { font-size: 1.8rem; font-weight: 600; color: #2c3e50; margin-top: 4px; }
         .metric .unit { font-size: 0.85rem; color: #95a5a6; }
@@ -168,6 +168,29 @@
                             <div class="label">上电次数</div>
                             <div class="value" style="font-size:1.1rem" id="powerOnCount">--</div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>空气质量</h2>
+                <div class="grid-4">
+                    <div class="metric" id="m-pm25">
+                        <div class="label">PM2.5</div>
+                        <div class="value"><span id="pm25">--</span><span class="unit">μg/m³</span></div>
+                        <div class="value" style="font-size:0.8rem;margin-top:4px" id="pm25Level">--</div>
+                    </div>
+                    <div class="metric">
+                        <div class="label">PM1.0</div>
+                        <div class="value"><span id="pm10">--</span><span class="unit">μg/m³</span></div>
+                    </div>
+                    <div class="metric">
+                        <div class="label">PM10</div>
+                        <div class="value"><span id="pm100">--</span><span class="unit">μg/m³</span></div>
+                    </div>
+                    <div class="metric">
+                        <div class="label">>0.3μm 颗粒数</div>
+                        <div class="value"><span id="part03">--</span><span class="unit">个/0.1L</span></div>
                     </div>
                 </div>
             </div>
@@ -468,6 +491,14 @@
         tempColor($('#m-fan-temp'), fanT, d.fanLThreshold, d.fanHThreshold);
         tempColor($('#m-led-temp'), ledT, d.LEDLThreshold, d.LEDHThreshold);
 
+        // 空气质量
+        const pm25 = d.pm2_5, pm10 = d.pm1_0, pm100 = d.pm10, part03 = d.part0_3;
+        $('#pm25').text(fmt(pm25, ''));
+        $('#pm10').text(fmt(pm10, ''));
+        $('#pm100').text(fmt(pm100, ''));
+        $('#part03').text(fmt(part03, ''));
+        pm25Color($('#m-pm25'), pm25);
+
         // 同步控制页滑块（仅当用户未在拖动时）
         if (!$('#brightnessSlider').is(':focus')) $('#brightnessSlider').val(d.brightness || 0);
         if (!$('#colorTempSlider').is(':focus')) $('#colorTempSlider').val(d.colorTemperature || 0);
@@ -484,6 +515,22 @@
         if (hi !== undefined && val >= hi) $el.addClass('danger');
         else if (lo !== undefined && val > lo) $el.addClass('warn');
         else $el.addClass('ok');
+    }
+
+    // PM2.5 空气质量分级（中国 AQI 24h 均值分段，实时显示作参考）
+    function pm25Color($el, val) {
+        $el.removeClass('ok warn danger').css('border-color', '');
+        const $lv = $('#pm25Level');
+        if (val === undefined || val === null || val === INVALID) { $lv.text('--'); return; }
+        let color, label;
+        if (val <= 35)       { color = '#27ae60'; label = '优'; }
+        else if (val <= 75)  { color = '#f1c40f'; label = '良'; }
+        else if (val <= 115) { color = '#e67e22'; label = '轻度污染'; }
+        else if (val <= 150) { color = '#e74c3c'; label = '中度污染'; }
+        else if (val <= 250) { color = '#8e44ad'; label = '重度污染'; }
+        else                 { color = '#7f2c2c'; label = '严重污染'; }
+        $lv.text(label).css('color', color);
+        $el.css('border-color', color);
     }
 
     function applySwitchColor() {

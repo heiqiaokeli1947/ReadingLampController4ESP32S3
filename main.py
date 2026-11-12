@@ -284,6 +284,15 @@ def handler(request):
         res["presure"] = sd.presure
         res["luminance"] = sd.luminance
         res["pm25"] = sd.pm25
+        res["pm1_0"] = sd.pm1_0
+        res["pm2_5"] = sd.pm2_5
+        res["pm10"] = sd.pm10
+        res["part0_3"] = sd.part0_3
+        res["part0_5"] = sd.part0_5
+        res["part1_0"] = sd.part1_0
+        res["part2_5"] = sd.part2_5
+        res["part5_0"] = sd.part5_0
+        res["part10"] = sd.part10
         res["tempBMP280"] = sd.tempBMP280
         res["tempLM75_1"] = sd.tempLM75_1
         res["tempLM75_2"] = sd.tempLM75_2
