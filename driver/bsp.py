@@ -15,11 +15,12 @@ from driver.ws2818_matrix import WS2818Matrix
 
 # 传感器健康管理参数
 _SENSOR_STALE_MS = const(10000)        # 超过 10s 无有效值 → 数据判为老化，置无效值
-_I2C_MAX_FAIL_COUNT = const(30)        # 连续 30 次读失败 → 重建 I2C 总线
+_I2C_MAX_FAIL_COUNT = const(10)        # 连续 10 次全局读失败 → 重建 I2C 总线（总线锁死自愈）
 _I2C_RECOVER_RETRY_MS = const(60000)   # 传感器全缺失时每 60s 重试扫描（支持热插拔）
 _PMS5003_INIT_RETRY = const(6)         # PMS5003 上电预热重试次数（传感器约需 10s 就绪）
 _PMS5003_INIT_DELAY_MS = const(2000)   # 每次重试间隔 2s
-_HOTPLUG_INTERVAL_MS = const(5000)     # 热插拔重连检测间隔：缺失传感器每 5s 快速扫描一次
+_HOTPLUG_INTERVAL_MS = const(2000)     # 热插拔重连检测间隔：缺失传感器每 2s 快速扫描一次
+_SENSOR_FAIL_THRESHOLD = const(3)      # 单传感器连续 3 次读失败 → 置 None，交由热插拔检测恢复
 _ENV_FILTER_ALPHA = const(0.35)        # 环境传感器 EMA 滤波系数（越小越平滑，0.35≈3次采样达稳态）
 
 _DEFAULT_PWM_FREQ = const(25000)
@@ -108,6 +109,13 @@ class BSP:
         self._i2cFailCount = 0         # 连续读失败次数
         self._lastRecoverTick = utime.ticks_ms()
         self._lastHotPlugTick = 0      # 热插拔重连检测上次时间戳（所有缺失传感器共用）
+        # 单传感器连续失败计数（达阈值后置 None，交由热插拔检测快速恢复）
+        self._fanFailCount = 0
+        self._ledFailCount = 0
+        self._pmsFailCount = 0
+        self._bh1750FailCount = 0
+        self._bmp280FailCount = 0
+        self._hdc1080FailCount = 0
 
         # 环境传感器 EMA 滤波状态（-9999 表示尚未初始化，首次有效值直接赋值）
         self._filtEnvTemp = -9999      # HDC1080 温度
@@ -288,11 +296,12 @@ class BSP:
         return state * (1.0 - alpha) + raw * alpha
 
     def readSensors(self):
-        """由主循环时间驱动调用（1Hz），读取 LM75A 温度。容错策略：
+        """由主循环时间驱动调用（1Hz），读取所有传感器。容错策略：
         1. 单次读失败：保留上次有效值，日志仅在"故障/恢复"翻转时各打印一次
-        2. 连续 _SENSOR_STALE_MS 无有效值：数据判为老化，置 -9999 交 FSM 故障安全处理
-        3. 连续 _I2C_MAX_FAIL_COUNT 次读失败：重建 I2C 总线与传感器对象（总线锁死自愈）
-        4. 任一路传感器缺失：每 _I2C_RECOVER_RETRY_MS 重试扫描，支持热插拔"""
+        2. 单传感器连续 _SENSOR_FAIL_THRESHOLD 次失败 → 置 None（判定为已拔出）
+        3. 对象为 None 的传感器每 _HOTPLUG_INTERVAL_MS 快速重扫（2s 内热插拔恢复）
+        4. 连续 _SENSOR_STALE_MS 无有效值：数据判为老化，置 -9999 交 FSM 故障安全处理
+        5. 全局连续 _I2C_MAX_FAIL_COUNT 次失败 → 重建 I2C 总线（总线锁死自愈）"""
         now = utime.ticks_ms()
         if utime.ticks_diff(now, self._lastSensorTick) < 1000:
             return
@@ -304,11 +313,18 @@ class BSP:
             try:
                 self.__sensorData.LM75FanTemp = self.LM75FanTemp.temp()
                 self._lastGoodFanTick = now
+                self._fanFailCount = 0
                 if self._fanReadFailed:
                     self._fanReadFailed = False
                     log("LM75A fan(0x4A) read recovered.")
             except OSError as e:
                 failed = True
+                self._fanFailCount += 1
+                if self._fanFailCount >= _SENSOR_FAIL_THRESHOLD:
+                    log("[WARN] LM75A fan(0x4A) {} consecutive fails, mark unplugged.".format(
+                        _SENSOR_FAIL_THRESHOLD))
+                    self.LM75FanTemp = None
+                    self._fanFailCount = 0
                 if not self._fanReadFailed:
                     self._fanReadFailed = True
                     log("[WARN] LM75A fan(0x4A) read failed, keep last value:{}".format(e))
@@ -317,19 +333,34 @@ class BSP:
             try:
                 self.__sensorData.LM75LedTemp = self.LM75LedTemp.temp()
                 self._lastGoodLedTick = now
+                self._ledFailCount = 0
                 if self._ledReadFailed:
                     self._ledReadFailed = False
                     log("LM75A led(0x4F) read recovered.")
             except OSError as e:
                 failed = True
+                self._ledFailCount += 1
+                if self._ledFailCount >= _SENSOR_FAIL_THRESHOLD:
+                    log("[WARN] LM75A led(0x4F) {} consecutive fails, mark unplugged.".format(
+                        _SENSOR_FAIL_THRESHOLD))
+                    self.LM75LedTemp = None
+                    self._ledFailCount = 0
                 if not self._ledReadFailed:
                     self._ledReadFailed = True
                     log("[WARN] LM75A led(0x4F) read failed, keep last value:{}".format(e))
 
-        # 热插拔重连：任一传感器对象为 None 时每 5s 快速扫描总线，
-        # 传感器插回后 5s 内自动恢复，无需等待 60s 的总线恢复周期
+        # 热插拔重连：任一传感器对象为 None 时每 2s 快速扫描总线，
+        # 传感器插回后 2s 内自动恢复，无需等待 60s 的总线恢复周期
         if utime.ticks_diff(now, self._lastHotPlugTick) >= _HOTPLUG_INTERVAL_MS:
             self._lastHotPlugTick = now
+            if self.LM75FanTemp is None:
+                s = self._createLm75A(0x4A, "fan")
+                if s is not None:
+                    self.LM75FanTemp = s
+            if self.LM75LedTemp is None:
+                s = self._createLm75A(0x4F, "led")
+                if s is not None:
+                    self.LM75LedTemp = s
             if self.pms5003 is None:
                 s = self._createPMS5003(quick=True)
                 if s is not None:
@@ -353,11 +384,18 @@ class BSP:
             if d is not None:
                 self.__sensorData.updatePMS(d)
                 self._lastGoodPmsTick = now
+                self._pmsFailCount = 0
                 if self._pmsReadFailed:
                     self._pmsReadFailed = False
                     log("PMS5003 read recovered.")
             else:
                 failed = True
+                self._pmsFailCount += 1
+                if self._pmsFailCount >= _SENSOR_FAIL_THRESHOLD:
+                    log("[WARN] PMS5003 {} consecutive fails, mark unplugged.".format(
+                        _SENSOR_FAIL_THRESHOLD))
+                    self.pms5003 = None
+                    self._pmsFailCount = 0
                 if not self._pmsReadFailed:
                     self._pmsReadFailed = True
                     log("[WARN] PMS5003 read failed, keep last value.")
@@ -369,11 +407,18 @@ class BSP:
                 self._filtEnvLux = self._ema(self._filtEnvLux, lux, _ENV_FILTER_ALPHA)
                 self.__sensorData.luminance = self._filtEnvLux
                 self._lastGoodBh1750Tick = now
+                self._bh1750FailCount = 0
                 if self._bh1750ReadFailed:
                     self._bh1750ReadFailed = False
                     log("BH1750 read recovered.")
             else:
                 failed = True
+                self._bh1750FailCount += 1
+                if self._bh1750FailCount >= _SENSOR_FAIL_THRESHOLD:
+                    log("[WARN] BH1750 {} consecutive fails, mark unplugged.".format(
+                        _SENSOR_FAIL_THRESHOLD))
+                    self.bh1750 = None
+                    self._bh1750FailCount = 0
                 if not self._bh1750ReadFailed:
                     self._bh1750ReadFailed = True
                     log("[WARN] BH1750 read failed, keep last value.")
@@ -389,11 +434,18 @@ class BSP:
                 # 用滤波后实测气压更新湿球温度计算器（BMP280 单位 Pa，与 AACOps.p 一致）
                 self._aac.set_pressure(self._filtEnvPress)
                 self._lastGoodBmp280Tick = now
+                self._bmp280FailCount = 0
                 if self._bmp280ReadFailed:
                     self._bmp280ReadFailed = False
                     log("BMP280 read recovered.")
             else:
                 failed = True
+                self._bmp280FailCount += 1
+                if self._bmp280FailCount >= _SENSOR_FAIL_THRESHOLD:
+                    log("[WARN] BMP280 {} consecutive fails, mark unplugged.".format(
+                        _SENSOR_FAIL_THRESHOLD))
+                    self.bmp280 = None
+                    self._bmp280FailCount = 0
                 if not self._bmp280ReadFailed:
                     self._bmp280ReadFailed = True
                     log("[WARN] BMP280 read failed, keep last value.")
@@ -410,11 +462,18 @@ class BSP:
                 # 湿球温度：AACOps.ts(干球温度℃, 相对湿度0~1)，h 为百分比需 /100
                 self.__sensorData.wetBulb = self._aac.ts(self._filtEnvTemp, self._filtEnvHumi / 100.0)
                 self._lastGoodHdc1080Tick = now
+                self._hdc1080FailCount = 0
                 if self._hdc1080ReadFailed:
                     self._hdc1080ReadFailed = False
                     log("HDC1080 read recovered.")
             else:
                 failed = True
+                self._hdc1080FailCount += 1
+                if self._hdc1080FailCount >= _SENSOR_FAIL_THRESHOLD:
+                    log("[WARN] HDC1080 {} consecutive fails, mark unplugged.".format(
+                        _SENSOR_FAIL_THRESHOLD))
+                    self.hdc1080 = None
+                    self._hdc1080FailCount = 0
                 if not self._hdc1080ReadFailed:
                     self._hdc1080ReadFailed = True
                     log("[WARN] HDC1080 read failed, keep last value.")
