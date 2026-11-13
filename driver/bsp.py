@@ -20,6 +20,7 @@ _I2C_RECOVER_RETRY_MS = const(60000)   # 传感器全缺失时每 60s 重试扫�
 _PMS5003_INIT_RETRY = const(6)         # PMS5003 上电预热重试次数（传感器约需 10s 就绪）
 _PMS5003_INIT_DELAY_MS = const(2000)   # 每次重试间隔 2s
 _HOTPLUG_INTERVAL_MS = const(5000)     # 热插拔重连检测间隔：缺失传感器每 5s 快速扫描一次
+_ENV_FILTER_ALPHA = const(0.35)        # 环境传感器 EMA 滤波系数（越小越平滑，0.35≈3次采样达稳态）
 
 _DEFAULT_PWM_FREQ = const(25000)
 _DEFAULT_PWM_DUTY = const(0)
@@ -107,6 +108,12 @@ class BSP:
         self._i2cFailCount = 0         # 连续读失败次数
         self._lastRecoverTick = utime.ticks_ms()
         self._lastHotPlugTick = 0      # 热插拔重连检测上次时间戳（所有缺失传感器共用）
+
+        # 环境传感器 EMA 滤波状态（-9999 表示尚未初始化，首次有效值直接赋值）
+        self._filtEnvTemp = -9999      # HDC1080 温度
+        self._filtEnvHumi = -9999      # HDC1080 湿度
+        self._filtEnvPress = -9999     # BMP280 气压
+        self._filtEnvLux = -9999       # BH1750 光照
 
         # LM75A 温度传感器（散热器出水口 0x4A，灯板 0x4F）
         # 逐个容错：缺失/总线故障时降级为 None，避免 OSError 冒泡到模块级
@@ -272,6 +279,14 @@ class BSP:
             log("[WARN] HDC1080 init failed:{}".format(e))
             return None
 
+    @staticmethod
+    def _ema(state, raw, alpha):
+        """指数移动平均滤波。
+        state=-9999（未初始化）时直接返回 raw；否则返回 alpha*raw + (1-alpha)*state。"""
+        if state == -9999:
+            return raw
+        return state * (1.0 - alpha) + raw * alpha
+
     def readSensors(self):
         """由主循环时间驱动调用（1Hz），读取 LM75A 温度。容错策略：
         1. 单次读失败：保留上次有效值，日志仅在"故障/恢复"翻转时各打印一次
@@ -347,11 +362,12 @@ class BSP:
                     self._pmsReadFailed = True
                     log("[WARN] PMS5003 read failed, keep last value.")
 
-        # BH1750 光照（读取失败返回 -9999 → 保留上次有效值）
+        # BH1750 光照（读取失败返回 -9999 → 保留上次有效值，EMA 滤波后存入）
         if self.bh1750 is not None:
             lux = self.bh1750.luminance(bh1750.BH1750.CONT_HIRES_1)
             if lux != -9999:
-                self.__sensorData.luminance = lux
+                self._filtEnvLux = self._ema(self._filtEnvLux, lux, _ENV_FILTER_ALPHA)
+                self.__sensorData.luminance = self._filtEnvLux
                 self._lastGoodBh1750Tick = now
                 if self._bh1750ReadFailed:
                     self._bh1750ReadFailed = False
@@ -362,15 +378,16 @@ class BSP:
                     self._bh1750ReadFailed = True
                     log("[WARN] BH1750 read failed, keep last value.")
 
-        # BMP280 气压/温度（读取失败返回 -9999 → 保留上次有效值）
+        # BMP280 气压/温度（读取失败返回 -9999 → 保留上次有效值，EMA 滤波后存入）
         if self.bmp280 is not None:
             t = self.bmp280.getTemp()
             p = self.bmp280.getPress()
             if t != -9999 and p != -9999:
+                self._filtEnvPress = self._ema(self._filtEnvPress, p, _ENV_FILTER_ALPHA)
                 self.__sensorData.tempBMP280 = t
-                self.__sensorData.presure = p
-                # 用实测气压更新湿球温度计算器（BMP280 单位 Pa，与 AACOps.p 一致）
-                self._aac.set_pressure(p)
+                self.__sensorData.presure = self._filtEnvPress
+                # 用滤波后实测气压更新湿球温度计算器（BMP280 单位 Pa，与 AACOps.p 一致）
+                self._aac.set_pressure(self._filtEnvPress)
                 self._lastGoodBmp280Tick = now
                 if self._bmp280ReadFailed:
                     self._bmp280ReadFailed = False
@@ -381,15 +398,17 @@ class BSP:
                     self._bmp280ReadFailed = True
                     log("[WARN] BMP280 read failed, keep last value.")
 
-        # HDC1080 温湿度（读取失败返回 -9999 → 保留上次有效值）
+        # HDC1080 温湿度（读取失败返回 -9999 → 保留上次有效值，EMA 滤波后存入）
         if self.hdc1080 is not None:
             t = self.hdc1080.temperature
             h = self.hdc1080.humidity
             if t != -9999 and h != -9999:
-                self.__sensorData.temp = t
-                self.__sensorData.humi = h
+                self._filtEnvTemp = self._ema(self._filtEnvTemp, t, _ENV_FILTER_ALPHA)
+                self._filtEnvHumi = self._ema(self._filtEnvHumi, h, _ENV_FILTER_ALPHA)
+                self.__sensorData.temp = self._filtEnvTemp
+                self.__sensorData.humi = self._filtEnvHumi
                 # 湿球温度：AACOps.ts(干球温度℃, 相对湿度0~1)，h 为百分比需 /100
-                self.__sensorData.wetBulb = self._aac.ts(t, h / 100.0)
+                self.__sensorData.wetBulb = self._aac.ts(self._filtEnvTemp, self._filtEnvHumi / 100.0)
                 self._lastGoodHdc1080Tick = now
                 if self._hdc1080ReadFailed:
                     self._hdc1080ReadFailed = False
@@ -449,6 +468,7 @@ class BSP:
                 utime.ticks_diff(now, self._lastGoodBh1750Tick) >= _SENSOR_STALE_MS and \
                 self.__sensorData.luminance != -9999:
             self.__sensorData.luminance = -9999
+            self._filtEnvLux = -9999
             log("[WARN] BH1750 data stale >{}s, mark invalid.".format(
                 _SENSOR_STALE_MS // 1000))
 
@@ -457,6 +477,7 @@ class BSP:
                 self.__sensorData.presure != -9999:
             self.__sensorData.tempBMP280 = -9999
             self.__sensorData.presure = -9999
+            self._filtEnvPress = -9999
             # BMP280 数据失效，湿球温度计算回退到标准大气压
             self._aac.reset_pressure()
             log("[WARN] BMP280 data stale >{}s, mark invalid.".format(
@@ -468,6 +489,8 @@ class BSP:
             self.__sensorData.temp = -9999
             self.__sensorData.humi = -9999
             self.__sensorData.wetBulb = -9999
+            self._filtEnvTemp = -9999
+            self._filtEnvHumi = -9999
             log("[WARN] HDC1080 data stale >{}s, mark invalid.".format(
                 _SENSOR_STALE_MS // 1000))
 
