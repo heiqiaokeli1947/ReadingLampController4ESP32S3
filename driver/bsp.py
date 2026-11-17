@@ -311,7 +311,7 @@ class BSP:
         # 传感器缺失时对象为 None，跳过读取（温度保持无效值 -9999）
         if self.LM75FanTemp is not None:
             try:
-                self.__sensorData.LM75FanTemp = self.LM75FanTemp.temp()
+                self.__sensorData.LM75FanTemp = round(self.LM75FanTemp.temp(), 1)
                 self._lastGoodFanTick = now
                 self._fanFailCount = 0
                 if self._fanReadFailed:
@@ -331,7 +331,7 @@ class BSP:
 
         if self.LM75LedTemp is not None:
             try:
-                self.__sensorData.LM75LedTemp = self.LM75LedTemp.temp()
+                self.__sensorData.LM75LedTemp = round(self.LM75LedTemp.temp(), 1)
                 self._lastGoodLedTick = now
                 self._ledFailCount = 0
                 if self._ledReadFailed:
@@ -429,7 +429,7 @@ class BSP:
             p = self.bmp280.getPress()
             if t != -9999 and p != -9999:
                 self._filtEnvPress = self._ema(self._filtEnvPress, p, _ENV_FILTER_ALPHA)
-                self.__sensorData.tempBMP280 = t
+                self.__sensorData.tempBMP280 = round(t, 1)
                 self.__sensorData.presure = self._filtEnvPress
                 # 用滤波后实测气压更新湿球温度计算器（BMP280 单位 Pa，与 AACOps.p 一致）
                 self._aac.set_pressure(self._filtEnvPress)
@@ -457,10 +457,10 @@ class BSP:
             if t != -9999 and h != -9999:
                 self._filtEnvTemp = self._ema(self._filtEnvTemp, t, _ENV_FILTER_ALPHA)
                 self._filtEnvHumi = self._ema(self._filtEnvHumi, h, _ENV_FILTER_ALPHA)
-                self.__sensorData.temp = self._filtEnvTemp
+                self.__sensorData.temp = round(self._filtEnvTemp, 1)
                 self.__sensorData.humi = self._filtEnvHumi
                 # 湿球温度：AACOps.ts(干球温度℃, 相对湿度0~1)，h 为百分比需 /100
-                self.__sensorData.wetBulb = self._aac.ts(self._filtEnvTemp, self._filtEnvHumi / 100.0)
+                self.__sensorData.wetBulb = round(self._aac.ts(self._filtEnvTemp, self._filtEnvHumi / 100.0), 1)
                 self._lastGoodHdc1080Tick = now
                 self._hdc1080FailCount = 0
                 if self._hdc1080ReadFailed:
