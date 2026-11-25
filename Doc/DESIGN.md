@@ -1,6 +1,6 @@
 # 阅读台灯控制器设计文档 (DESIGN.md)
 
-> 本设计文档按当前代码实现刷新（2026-11-11），覆盖从 ESP32-WROOM-32 迁移至 ESP32-S3 后的完整形态，架构对齐 Aotomizer4ESP32S3 雾化器项目。所有结论均可由源码逐行佐证。
+> 本设计文档按当前代码实现刷新（2026-11-17，v1.6），覆盖从 ESP32-WROOM-32 迁移至 ESP32-S3 后的完整形态，架构对齐 Aotomizer4ESP32S3 雾化器项目。所有结论均可由源码逐行佐证。
 
 ## 版本历史
 
@@ -12,6 +12,7 @@
 | v1.3 | 2026-11-09 | 新增第 0 节：核心原则（代码稳定性优先）；更新架构图为 ThermalControlFSM 基类继承关系 |
 | v1.4 | 2026-11-09 | 新增第 0.2 节：术语表；新增第 21 节：安全性设计；新增第 22 节：测试规范；新增第 23 节：监控与告警；新增第 24 节：日志规范；完善 Web API 错误码 |
 | v1.5 | 2026-11-11 | 新增 WS2818 8×8 RGB 矩阵（18 动画 + 滚动文本）；编码器步长 2%→1%、方向顺时针增亮；调光渐变修复（小变化 ease-out）；前端 UI 多项优化（矩阵参数实时下发、按钮对齐、时间中文单位、保存按钮统一、WiFi 密码回显、fmtTime 始终显示秒）；静态资源加 Cache-Control: max-age=0 |
+| v1.6 | 2026-11-17 | 传感器体系落地：SoftI2C → 硬件 I2C(I2C0)；接入 PMS5003(0x12 空气质量)、BH1750(0x23 光照)、BMP280(0x76 气压)、HDC1080(0x40 温湿度)；湿球温度计算（AACOps，BMP280 实测气压动态更新，缺省回退 101325Pa）；环境量 EMA 滤波（α=0.35）；热插拔优化（单传感器连续 3 次失败置 None + 2s 快速重扫，响应 35s→约 5s）；全部温度值 0.1 精度；Web 新增空气质量卡片（AQI 分级配色）与环境监测卡片（5 列：环境温/湿球温/湿度/气压/光照）；PMS5003 驱动修复校验和 bug 并增加帧头/帧长校验 |
 
 ---
 
@@ -36,12 +37,12 @@
 | 术语 | 说明 |
 |------|------|
 | FSM | Finite State Machine，有限状态机。本项目灯光/风扇/水泵控制均采用 FSM |
-| EMA | Exponential Moving Average，指数移动平均。用于温度滤波，α=0.25 |
+| EMA | Exponential Moving Average，指数移动平均。LM75A 控制温度滤波 α=0.25；环境传感器（HDC1080/BMP280/BH1750）显示值滤波 α=0.35 |
 | 滞回带 | Hysteresis，阈值上下的死区范围，避免临界点反复启停。本项目 ±1.5℃ |
 | PWM | Pulse Width Modulation，脉宽调制。用于 LED 亮度调节和风扇/水泵转速控制 |
 | LEDC | ESP32 的 PWM 外设（LED PWM Controller），本项目用 4/8 通道 |
-| I²C / I2C | Inter-Integrated Circuit，两线串行总线。连接 LM75A 温度传感器 |
-| SoftI2C | 软件模拟 I²C，用 GPIO 翻转实现时序。本项目使用 SoftI2C |
+| I²C / I2C | Inter-Integrated Circuit，两线串行总线。挂载 LM75A×2、PMS5003、BH1750、BMP280、HDC1080 共 6 个传感器 |
+| 硬件 I2C | ESP32-S3 的 I2C 外设（本项目用 I2C0）。v1.6 起替代 SoftI2C，时序由硬件产生，更稳定且不占 CPU |
 | PCNT | Pulse Counter，ESP32 脉冲计数器外设。machine.Encoder 基于此实现 |
 | 正交解码 | Quadrature Decoding，通过 A/B 两相相位差判断旋转方向和步数 |
 | WDT | Watchdog Timer，看门狗定时器。主循环卡死时自动复位 |
@@ -59,7 +60,7 @@
 ## 1. 项目概述
 
 ### 1.1 项目定位
-基于 **ESP32-S3** 的智能阅读台灯控制器，运行 **MicroPython** 固件。核心功能：旋钮调节亮度/色温（暖黄+冷白双色 PWM 混光）、水冷级联散热（灯板温度驱动水泵 → 散热器出水口温度驱动风扇）、双路 LM75A 温度监测与平滑调速（EMA 滤波 + 滞回带 + 渐变限速）、8×8 WS2818 RGB 矩阵（18 种内置动画 + 滚动文本）、WiFi Web 配置界面与实时监控。预留 BMP280/HDC1080/BH1750/PMS5003 传感器接口（驱动已移植，当前未接入硬件）。
+基于 **ESP32-S3** 的智能阅读台灯控制器，运行 **MicroPython** 固件。核心功能：旋钮调节亮度/色温（暖黄+冷白双色 PWM 混光）、水冷级联散热（灯板温度驱动水泵 → 散热器出水口温度驱动风扇）、双路 LM75A 温度监测与平滑调速（EMA 滤波 + 滞回带 + 渐变限速）、8×8 WS2818 RGB 矩阵（18 种内置动画 + 滚动文本）、WiFi Web 配置界面与实时监控。环境监测体系：PMS5003 空气质量（PM1.0/2.5/10 + 6 档颗粒计数）、HDC1080 温湿度、BMP280 气压、BH1750 光照，并由 AACOps 计算湿球温度（实测气压动态修正）。全部传感器共享一条硬件 I2C 总线，支持热插拔与数据老化判定。
 
 ### 1.2 核心特性
 
@@ -73,6 +74,10 @@
 | 风扇温控 | 散热器出水口 LM75A(0x4A) 温度线性映射风扇转速，二级散热，关灯即停 |
 | 水泵温控 | 灯板 LM75A(0x4F) 温度线性映射水泵转速，一级散热，关灯后继续循环降温 |
 | 平滑调速 | EMA 温度滤波（α=0.25）+ ±1.5℃ 滞回 + 25%/s 渐变限速，消除启停震荡与转速跳变 |
+| 空气质量监测 | PMS5003(I2C 0x12)：PM1.0/PM2.5/PM10（CF 与大气值）+ 6 档颗粒计数，Web 按中国 AQI 分级配色 |
+| 环境监测 | HDC1080 温湿度、BMP280 气压、BH1750 光照；环境量 EMA 滤波（α=0.35）后显示 |
+| 湿球温度 | AACOps 由干球温度+相对湿度+气压计算；BMP280 接入时用实测气压，未接入/失效回退标准大气压 101325Pa |
+| 传感器热插拔 | 单传感器连续 3 次读失败置 None 判定拔出；缺失传感器每 2s 快速重扫，插回约 5s 内恢复 |
 | Web 管理界面 | 单页应用，两 Tab：监控（首屏即灯光控制）/ 设置 |
 | 设置防覆盖 | 设置页编辑后暂停自动回填 5s；保存失败立即用设备当前参数回填 |
 | WiFi 双模式 | STA 连接 + AP 配网（300s 超时重启） |
@@ -92,7 +97,7 @@
 | Web 框架 | Microdot（独立线程运行，32KB 栈） |
 | 数据库 | ubtree (BTree) |
 | 前端 | 原生 JS + jQuery + Spectre CSS + SweetAlert + Chart.js |
-| 传感器协议 | I²C (LM75A ×2) |
+| 传感器协议 | 硬件 I²C I2C0（LM75A×2 / PMS5003 / BH1750 / BMP280 / HDC1080，共 6 设备） |
 | 输入 | 旋转编码器（CLK/DT IRQ + KEY） |
 | 静态资源 | gzip 预压缩（总传输量 -73%） |
 
@@ -105,7 +110,7 @@
 | 主循环频率 | 20 Hz（`sleep_ms(50)`） |
 | 传感器采集 | 主循环时间驱动 1 Hz（BSP 内部节流） |
 | WDT 超时 | 60 s，Timer(0) 每 15 s 条件喂狗 |
-| I²C 速率 | 100 kHz（SoftI2C, GPIO7 SCL / GPIO42 SDA） |
+| I²C 速率 | 100 kHz（硬件 I2C0, GPIO7 SCL / GPIO42 SDA） |
 | PWM 频率 | 25 kHz（风扇/水泵/暖黄/冷白） |
 | NTP 服务器 | ntp.aliyun.com:123 |
 | 配网 AP | `ReadingLamp`，密码 `APPwd` |
@@ -126,11 +131,11 @@ ReadingLampController4ESP32S3/
 │   ├── PumpFSM.py             # 水泵控制状态机（EMA滤波+滞回+渐变限速）
 │   ├── ThermalControlFSM.py   # 温控 FSM 基类（FanFSM/PumpFSM 继承）
 │   ├── matrix_anim.py         # WS2818 矩阵动画引擎（18 动画 + ScrollText）
-│   ├── sensorData.py          # 全局传感器数据容器（含预留字段）
+│   ├── sensorData.py          # 全局传感器数据容器（温度/湿度/气压/光照/PM/湿球）
 │   ├── DBUtils.py             # BTree 数据库读写（线程锁串行化）
 │   ├── wifi.py                # WiFi 连接管理 + 复位式重连
 │   ├── ntpSync.py             # NTP 网络对时（北京时间 UTC+8）
-│   ├── AACOps.py              # 湿球温度计算（预留，当前未接入温湿度）
+│   ├── AACOps.py              # 湿球温度计算（HDC1080 温湿度 + BMP280 动态气压）
 │   ├── LogUtils.py            # 全局日志（log() 带时间戳前缀）
 │   └── fileUtils.py           # 文件工具
 │
@@ -139,10 +144,10 @@ ReadingLampController4ESP32S3/
 │   ├── ws2818_matrix.py       # WS2818 8×8 RGB 矩阵驱动（RMT 单线 800kHz）
 │   ├── matrix_font.py         # 5×8 字体（A-Z a-z 0-9 标点）
 │   ├── lm75a.py               # LM75A 温度传感器（I²C 0x4A/0x4F）
-│   ├── bmp280.py              # BMP280 气压/温度（预留死代码）
-│   ├── hdc1080.py             # HDC1080 温湿度（预留死代码）
-│   ├── bh1750.py              # BH1750 光照（预留死代码）
-│   └── pms5003.py             # PMS5003 PM2.5（预留死代码）
+│   ├── bmp280.py              # BMP280 气压/温度（I²C 0x76，已接入）
+│   ├── hdc1080.py             # HDC1080 温湿度（I²C 0x40，已接入）
+│   ├── bh1750.py              # BH1750 光照（I²C 0x23，已接入）
+│   └── pms5003.py             # PMS5003 颗粒物（I²C 0x12，已接入，帧头/帧长/校验和三重校验）
 │
 ├── lib/                       # 第三方库
 │   ├── microdot.py            # 轻量级 Web 框架
@@ -207,8 +212,8 @@ ReadingLampController4ESP32S3/
 
 | 类别 | 硬件 | 引脚 | 上下拉 | 用途 |
 |------|------|------|--------|------|
-| I²C | SoftI2C SCL | GPIO7 | 外置 2.2kΩ | LM75A 总线时钟，100 kHz |
-| I²C | SoftI2C SDA | GPIO42 | 外置 2.2kΩ | LM75A 总线数据 |
+| I²C | I2C0 SCL | GPIO7 | 外置 2.2kΩ | 传感器总线时钟，100 kHz，硬件 I2C |
+| I²C | I2C0 SDA | GPIO42 | 外置 2.2kΩ | 传感器总线数据 |
 | GPIO 输出 | LED_EN_A | GPIO3 | — | LED 电源使能 A（推挽，低=关） |
 | GPIO 输出 | LED_EN_B | GPIO9 | — | LED 电源使能 B（推挽，低=关） |
 | PWM 输出 | 风扇 | GPIO8 | — | 风扇转速，25 kHz |
@@ -242,7 +247,7 @@ ReadingLampController4ESP32S3/
 | **功能分组** | PWM 四通道集中在左列 GPIO8/16/17/18；编码器 CLK/DT 相邻（GPIO39/40）；I²C 分置两列（GPIO7 + GPIO42，与老项目一致）；LED_EN_A/B 分置两侧便于走电源 |
 | **输入保护** | 编码器 CLK/DT/KEY 均内部上拉，断线=高=静止态，安全；按键低有效 |
 | **I²C 上拉** | BSP 未启用内部上拉，依赖外置 2.2kΩ；100 kHz 稳定 |
-| **资源占用** | GPIO 用 12 个（+2 死代码），PWM 用 4/8 通道（LEDC，剩余 4 通道可扩展），I²C 用 1（SoftI2C），Timer 用 2（0/3），WDT 1。剩余 GPIO、Timer 1/2、UART、ADC、SPI 均可扩展 |
+| **资源占用** | GPIO 用 12 个（+2 死代码），PWM 用 4/8 通道（LEDC，剩余 4 通道可扩展），I²C 用 1（硬件 I2C0，挂 6 设备），Timer 用 2（0/3），WDT 1。剩余 GPIO、Timer 1/2、UART、ADC、SPI 均可扩展 |
 
 **潜在改进点（非阻塞）：**
 - PWM 当前用 4/8 LEDC 通道，剩余 4 通道可直接扩展；若需更多通道再考虑软件 PWM
@@ -399,8 +404,8 @@ boot → 加载配置(DB+默认合并) → 生成 deviceId → BSP 初始化 →
 | 方法 | 功能 |
 |------|------|
 | `setConfig(config)` / `initHW()` / `updatePWM()` | PWM 单次构造 + 原地更新频率（不重置 duty） |
-| `readSensors()` | 1Hz 节流读取 LM75A；单次失败保留上次值；10s 老化置 -9999；连续 30 次失败重建 I²C 总线；全缺失 60s 重扫 |
-| `recoverI2C()` | 重建 SoftI2C 并重新绑定 LM75A（总线锁死自愈路径） |
+| `readSensors()` | 1Hz 节流读取全部 6 个传感器；单传感器连续 3 次失败置 None；缺失传感器 2s 快速重扫；10s 数据老化置 -9999；全局连续 10 次失败重建 I²C 总线 |
+| `recoverI2C()` | 重建硬件 I2C0 并重新绑定全部传感器（总线锁死自愈路径） |
 | `setPwm(ch, freq, min, max, percent, reverse)` | 0-1000 映射到 min~max 占空比，频率未变跳过 `freq()` |
 | `enableLED(status)` | LED 电源使能 A+B 同步开关 |
 | `setLEDArray(color)` | WS2812 RGB 颜色（状态指示） |
@@ -414,7 +419,7 @@ full = (maxDuty - minDuty) / 100.0 * 1023 # 可调范围对应计数值
 duty = full * (percent / 1000.0) + base   # 线性映射
 ```
 
-**死传感器处理函数：** `bmp280TimerHandler` / `hdc1080TimerHandler` / `bh1750TimerHandler` / `pms5003TimerHandler` 均为 `pass` 桩，读取逻辑已注释，硬件接入后取消注释即可。
+**环境传感器读取：** v1.6 起 `readSensors()` 统一读取 LM75A×2 + PMS5003 + BH1750 + BMP280 + HDC1080（详见第 6 章）。早期版本的 `bmp280TimerHandler` 等 `pass` 桩已移除，由 `_createBMP280()` 等工厂方法 + 热插拔重扫取代。
 
 ### 5.3 LightControllFSM — 灯光控制状态机
 
@@ -577,15 +582,19 @@ step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
 
 | 字段 | 来源 | 说明 |
 |------|------|------|
-| tempLM75_1 / LM75FanTemp | LM75A 0x4A | 水冷散热器出水口侧温度（实际接入） |
-| tempLM75_2 / LM75LedTemp | LM75A 0x4F | 灯板温度（实际接入） |
+| tempLM75_1 / LM75FanTemp | LM75A 0x4A | 水冷散热器出水口侧温度（实际接入），存储时 `round(x,1)` |
+| tempLM75_2 / LM75LedTemp | LM75A 0x4F | 灯板温度（实际接入），存储时 `round(x,1)` |
 | tempLM75_3 | 预留 | 第三路 LM75（未接入） |
-| **temp / humi** | **预留** | HDC1080 温湿度（驱动已移植） |
-| **presure / altitude / tempBMP280** | **预留** | BMP280 气压/海拔（驱动已移植） |
-| **luminance** | **预留** | BH1750 照度（驱动已移植） |
-| **pm25** | **预留** | PMS5003 PM2.5（驱动已移植） |
+| **temp / humi** | **HDC1080 0x40** | 环境温度（EMA 滤波 + round 0.1）/ 相对湿度 %RH（EMA 滤波） |
+| **wetBulb** | **AACOps 计算** | 湿球温度 ℃（round 0.1），由滤波后干球温度+湿度+气压算出 |
+| **presure / tempBMP280** | **BMP280 0x76** | 大气压 Pa（EMA 滤波）/ 温度 ℃（round 0.1）；altitude 字段保留未用 |
+| **luminance** | **BH1750 0x23** | 光照强度 lux（EMA 滤波） |
+| **pm1_0 / pm2_5 / pm10** | **PMS5003 0x12** | PM 浓度 μg/m³（大气值），`pm25` 为 pm2_5 的兼容别名 |
+| **part0_3 ~ part10** | **PMS5003 0x12** | 6 档颗粒计数（>0.3/0.5/1.0/2.5/5.0/10 μm，个/0.1L） |
 
 **无效值：** 全部初始 -9999。
+
+**批量更新方法：** `updatePMS(dict)` 一次性写入 PMS5003 全部 12 个字段，避免逐字段赋值重复代码。
 
 ### 5.7 DBUtils — 数据库工具
 
@@ -622,29 +631,42 @@ step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
 ## 6. 传感器驱动
 
 ### 6.1 LM75A（I²C 0x4A / 0x4F）
-- 11 位温度分辨率（0.125℃），-55~125℃
+- 11 位温度分辨率（0.125℃），-55~125℃；存储到 sensorData 前 `round(x,1)`，Web/日志均为一位小数
 - 开机实例化逐个 `try/except OSError`：传感器缺失/总线故障时降级为 `None`，不影响整机启动
 - BSP `readSensors()` 每 1s 读取一次；对象为 `None` 时跳过读取，温度保持无效值 -9999
 - 单次读失败：保留上次有效值，故障/恢复日志仅在状态翻转时打印一次（不刷屏）
 - **数据老化**：超过 10s（`_SENSOR_STALE_MS`）无有效值 → 置 -9999，FSM 按故障安全策略全速散热
-- **总线自愈**：连续 30 次（`_I2C_MAX_FAIL_COUNT`）读失败 → 重建 SoftI2C 并重新绑定传感器对象
-- **热插拔**：两路传感器全缺失时每 60s（`_I2C_RECOVER_RETRY_MS`）重试扫描，接入后自动恢复
+- **统一容错策略**（v1.6 起全部 6 个传感器一致）：
+  1. 单传感器连续 3 次（`_SENSOR_FAIL_THRESHOLD`）读失败 → 对象置 None（判定拔出）
+  2. 对象为 None 的传感器每 2s（`_HOTPLUG_INTERVAL_MS`）快速重扫，插回约 5s 内自动恢复
+  3. 全局连续 10 次（`_I2C_MAX_FAIL_COUNT`）读失败 → 重建硬件 I2C 并重新绑定全部传感器对象（总线锁死自愈）
+  4. 任一传感器缺失时另有 60s（`_I2C_RECOVER_RETRY_MS`）兜底重扫周期
 
-### 6.2 死传感器驱动（预留）
-驱动文件已从老项目移植：`bmp280.py`、`hdc1080.py`、`bh1750.py`、`pms5003.py`。BSP 中对应 handler 为 `pass` 桩。硬件接入后：
-1. 在 BSP `__init__` 实例化驱动对象
-2. 在 `readSensors()` 中取消注释读取逻辑
-3. sensorData 字段已就绪，自动透传到 Web
+### 6.2 环境传感器（PMS5003 / BH1750 / BMP280 / HDC1080）
+v1.6 全部接入，与 LM75A 共享硬件 I2C 总线，容错/热插拔/老化策略与 6.1 完全一致。
+
+| 传感器 | 地址 | 数据 | 特殊处理 |
+|--------|------|------|----------|
+| PMS5003 | 0x12 | PM1.0/2.5/10 + 6 档颗粒计数 | 开机预热重试 6 次×2s（传感器上电约 10s 才就绪，避免 ESP32 先启动漏检）；SET 脚须接地才进入 I2C 模式 |
+| BH1750 | 0x23 | 光照 lux | CONT_HIRES_1 连续高分辨率模式 |
+| BMP280 | 0x76 | 气压 Pa + 温度 ℃ | 气压 EMA 滤波后调用 `AACOps.set_pressure()` 动态修正湿球计算；数据老化时 `reset_pressure()` 回退 101325Pa |
+| HDC1080 | 0x40 | 温度 ℃ + 湿度 %RH | 温湿度 EMA 滤波后显示，并作为湿球温度计算输入 |
+
+**PMS5003 驱动要点（`driver/pms5003.py`）：** 修复了原移植代码校验和 bug（`range(0,29)` 漏算字节 29），新增帧头 `0x42 0x4D`、帧长 `0x001C`、校验和三重校验，读到的数据不可靠时返回 None 而非错误值。
+
+**AACOps 湿球计算（`domain/AACOps.py`）：** `ts(t, rh)` 输入干球温度 ℃ 与相对湿度 0~1（HDC1080 湿度为百分比，需 /100）。`set_pressure(p_pa)` 动态设置气压（合理范围 30000~110000 Pa，越界/非法值忽略），`reset_pressure()` 回退标准大气压。
 
 ### 6.3 I²C 总线
 
 | 项目 | 值 |
 |------|-----|
-| 实现 | SoftI2C |
+| 实现 | 硬件 I2C0（v1.6 起，替代 SoftI2C） |
 | SCL/SDA | GPIO7 / GPIO42 |
 | 速率 | 100 kHz |
-| 设备 | LM75A(0x4A) + LM75A(0x4F) |
+| 设备 | LM75A(0x4A) + LM75A(0x4F) + PMS5003(0x12) + BH1750(0x23) + BMP280(0x76) + HDC1080(0x40) |
 | 上拉 | 外置电阻 |
+
+**切换验证：** 硬件 I2C 与 SoftI2C 引脚相同，切换后全部 6 个传感器即插即用，已实测验证。
 
 ---
 
@@ -702,6 +724,12 @@ step = 100 * 本次 tick 间隔(ms) / FADE_TIME_MS
 | `pumpSpeed` / `fanSpeed` | 水泵/风扇实际转速百分比 |
 | `tempLM75_1` / `tempLM75_2` | 原始温度：散热器出水口(0x4A) / 灯板(0x4F)，无效值 -9999 |
 | `fanTemp` / `ledTemp` | 两路 FSM 内部 EMA 滤波后的温度 |
+| `temp` / `humi` | HDC1080 环境温度 ℃（0.1 精度）/ 湿度 %RH |
+| `wetBulb` | 湿球温度 ℃（0.1 精度，AACOps 计算） |
+| `presure` / `tempBMP280` | BMP280 大气压 Pa / 温度 ℃ |
+| `luminance` | BH1750 光照强度 lux |
+| `pm1_0` / `pm2_5` / `pm10` | PMS5003 PM 浓度 μg/m³（大气值） |
+| `part0_3` / `part0_5` / `part1_0` / `part2_5` / `part5_0` / `part10` | PMS5003 6 档颗粒计数（个/0.1L） |
 | `loopHz` | 主循环实测频率（每 5s 更新，用于发现阻塞掉速） |
 
 **安全约束：** `devicepwd`、`wifipwdDefault` 两个密码类字段**不下发**。`wifipwd`（WiFi 密码）自 v1.5 起**允许回显**——页面需 `devicepwd` 鉴权才能访问，且 AP 密码 `APPwd` 已下发回填，保持一致。前端 `syncSettingsForm` 直接填入 WiFi 密码输入框。
@@ -768,7 +796,7 @@ Tab 由 jQuery 事件驱动（`.tab[data-tab=x]` ↔ `.tab-panel#panel-x`），*
 
 | Tab | 面板 ID | 内容 |
 |-----|---------|------|
-| 📊 监控 | `panel-monitor` | ① 灯光控制：开关按钮（开灯时背景色随色温从 3000K 暖黄渐变到 6000K 冷白）/ 亮度 / 色温（显示 3000~6000K）/ 快捷场景（暖光·中性·冷白·延迟关灯开关）<br>② 散热系统 + 系统状态 两张卡片（双列，散热系统在前；系统状态仅含 5 项运行统计：LED本次点亮/LED累计点亮/系统总运行/系统本次运行/上电次数，开关·亮度·色温已归入灯光控制卡片）<br>③ 温度与散热趋势图 |
+| 📊 监控 | `panel-monitor` | ① 灯光控制：开关按钮（开灯时背景色随色温从 3000K 暖黄渐变到 6000K 冷白）/ 亮度 / 色温（显示 3000~6000K）/ 快捷场景（暖光·中性·冷白·延迟关灯开关）<br>② 散热系统 + 系统状态 两张卡片（双列，散热系统在前；系统状态仅含 5 项运行统计：LED本次点亮/LED累计点亮/系统总运行/系统本次运行/上电次数，开关·亮度·色温已归入灯光控制卡片）<br>③ 空气质量卡片：PM2.5 主显示（按中国 AQI 分级配色：优/良/轻度/中度/重度/严重污染）+ PM1.0/PM10/>0.3μm 颗粒数<br>④ 环境监测卡片（grid-5 五列）：环境温度 / 湿球温度 / 环境湿度 / 大气压(hPa) / 光照强度(lux)<br>⑤ 温度与散热趋势图 |
 | ⚙️ 设置 | `panel-settings` | ① 散热阈值（散热器出水温度/LED温度/风扇调整延迟）② 延迟关灯与护眼（延迟关灯时间 3~300s、视疲劳提醒间隔 0~60min）③ PWM 四通道参数（频率 Hz + 最小/最大占空比 %）④ 矩阵显示设置（动画选择/亮度/滚动文本+颜色+速度，亮度/速度/颜色滑动条变动即实时下发）⑤ 网络设置（WiFi 扫描 / AP 热点）⑥ 设备管理（重启 / 恢复出厂） |
 
 **设计原则：** 灯光控制是使用频率最高的操作，放在监控页首屏，页面一打开就能用；设置页只放低频的写入型参数，避免高频操作被埋在二级页签里。
@@ -868,7 +896,15 @@ python -c "import gzip; d=open('static/index.html','rb').read(); open('static/in
 
 ### 9.1 传感器数据流
 ```
-主循环 20Hz → bsp.readSensors() (1Hz 节流) → LM75A 0x4A/0x4F → sensorData.LM75FanTemp / LM75LedTemp
+主循环 20Hz → bsp.readSensors() (1Hz 节流)
+  ├─ LM75A 0x4A/0x4F        → sensorData.LM75FanTemp / LM75LedTemp（round 0.1）
+  ├─ PMS5003 0x12           → sensorData.updatePMS()（12 字段批量写入）
+  ├─ HDC1080 0x40           → EMA 滤波 → temp / humi（round 0.1）
+  │                            └─ + BMP280 气压 → AACOps.ts() → wetBulb（round 0.1）
+  ├─ BMP280 0x76            → presure（EMA）/ tempBMP280（round 0.1）
+  │                            └─ EMA 气压 → AACOps.set_pressure()
+  └─ BH1750 0x23            → EMA 滤波 → luminance
+任一传感器连续 3 次失败 → 对象置 None → 2s 快速重扫；数据超 10s 未更新 → 置 -9999
 ```
 
 ### 9.2 FSM 控制流
@@ -1010,22 +1046,27 @@ setInterval 2s → GET /status?mode=get
 
 | 扩展点 | 现状 | 接入方式 |
 |--------|------|----------|
-| **BMP280** | 驱动已移植 + sensorData 字段就绪 | BSP `__init__` 实例化 → `readSensors` 取消注释 |
-| **HDC1080** | 驱动已移植 + sensorData 字段就绪 | 同上 |
-| **BH1750** | 驱动已移植 + sensorData 字段就绪 | 同上（I²C 地址 0x23/0x5C，可与 LM75A 共总线） |
-| **PMS5003** | 驱动已移植 + sensorData 字段就绪 | 同上（UART） |
-| **第三路 LM75** | sensorData.tempLM75_3 已定义 | BSP 增加实例 + readSensors 读取 |
+| ~~BMP280 / HDC1080 / BH1750 / PMS5003~~ | **v1.6 已全部接入**（共享 I2C0 总线） | 见第 6 章 |
+| **第三路 LM75** | sensorData.tempLM75_3 已定义 | BSP 增加实例 + readSensors 读取（复用统一容错策略） |
+| **新 I²C 传感器** | I2C0 总线尚有大量空闲地址 | 参考 14.2 扩展指南 |
 | **Timer 1/2** | 未使用 | 新增定时任务 |
 | **ADC** | 未使用 | 模拟量传感器 |
 
-### 14.2 扩展指南（接入 BMP280 示例）
+### 14.2 扩展指南（接入新 I²C 传感器示例）
+以任意新 I²C 传感器为例，复用现有统一容错/热插拔框架：
 ```
-1. driver/bsp.py __init__: self.__bmp280 = bmp280.BMP280(self.softI2C)
-2. driver/bsp.py readSensors:
-     try: self.__sensorData.presure = self.__bmp280.getPress()
-     except OSError: pass
-3. main.py /status?mode=get: res 已包含 presure（透传）
-4. static/index.html: 前端展示（参考 luminance 实现）
+1. driver/ 下放置驱动文件（参考 bh1750.py）
+2. driver/bsp.py:
+   - __init__: self.xxx = self._createXxx()（工厂方法内部 try/except，缺失返回 None）
+   - _createXxx(quick=False): 检测地址在总线上则实例化，否则 log + return None
+   - readSensors(): if self.xxx is not None: 读取 → 成功清零失败计数 / 失败 +1
+                    连续 3 次失败置 self.xxx = None；EMA 滤波（可选）
+   - _checkSensorAge(): 超 10s 无有效值置 -9999
+   - 热插拔重扫块加: if self.xxx is None: self.xxx = self._createXxx(quick=True)
+   - recoverI2C(): 加 self.xxx = self._createXxx()
+3. domain/sensorData.py: 新增字段（默认 -9999）
+4. main.py /status?mode=get: res 增加字段透传
+5. static/index.html: 监控页新增卡片 + updateMonitor 回填（参考 envLux）
 ```
 
 ---
@@ -1036,8 +1077,7 @@ setInterval 2s → GET /status?mode=get
 
 | # | 描述 | 优先级 |
 |---|------|--------|
-| 1 | AACOps.py（湿球温度计算）已移植但温湿度传感器未接入，当前未使用 | 低 |
-| 2 | 死传感器驱动（bmp280/hdc1080/bh1750/pms5003）保留，硬件未接入 | 低 |
+| 1 | ~~AACOps.py 未使用~~ / ~~死传感器驱动未接入~~：v1.6 已全部接入并验证（PMS5003/BH1750/BMP280/HDC1080 + 湿球计算），此两条关闭 | — |
 | 3 | boot.py 为空，可启用 WebREPL | 低 |
 | 4 | 无 OTA 能力，固件更新需串口刷写 | 低 |
 | 5 | HardI2C 引脚定义（GPIO2/41）保留但未实例化 | 低 |
@@ -1339,6 +1379,14 @@ Invoke-RestMethod "http://192.168.30.74/status?devicepwd=pengping&mode=get" -Hea
 | 4 | **矩阵参数实时更新** | GPIO47 | ✅ 通过：亮度/速度/颜色滑动条变动即下发，动画不重启 |
 | 5 | **调光渐变** | yellowPwm/whitePwm | ✅ 通过：旋钮单格 1% 有 ease-out 平滑过渡，不再 1 tick 直达 |
 | 6 | **系统总运行时间** | DB | ✅ 通过：`totalRunTime` 随本次运行时间累加，fmtTime 始终显示秒 |
+| 7 | **硬件 I2C 切换** | I2C0 GPIO7/42 | ✅ 通过：SoftI2C → I2C(0)，6 个传感器即插即用，通信稳定 |
+| 8 | **PMS5003 空气质量** | I2C 0x12 | ✅ 通过：PM1.0/2.5/10 + 6 档颗粒计数正确；SET 脚接地进入 I2C 模式；开机预热重试生效 |
+| 9 | **HDC1080 温湿度** | I2C 0x40 | ✅ 通过：温度/湿度读取正常，EMA 滤波后显示平滑 |
+| 10 | **BMP280 气压** | I2C 0x76 | ✅ 通过：气压实测约 96~97 kPa，湿球计算随实测气压动态修正 |
+| 11 | **BH1750 光照** | I2C 0x23 | ✅ 通过：lux 读取正常，遮挡/照射变化响应正确 |
+| 12 | **湿球温度** | AACOps | ✅ 通过：25℃/100%RH 时湿球=干球（物理自洽）；气压降低湿球降低；越界气压被忽略 |
+| 13 | **传感器热插拔** | 全部 6 个 | ✅ 通过：拔出约 3s 判定、插回约 5s 内恢复，LM75A 两路同样支持 |
+| 14 | **温度 0.1 精度** | 全部温度字段 | ✅ 通过：fanTemp=22.8 / ledTemp=23.1 / temp=23.7 / wetBulb=19.8，无 24.125 类值 |
 
 ---
 
